@@ -1,0 +1,46 @@
+name: Build HCStudio
+
+on:
+  workflow_dispatch:   # chay thu cong bang nut Run workflow
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Lay ma nguon
+        uses: actions/checkout@v4
+
+      - name: Cai Go 1.23
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Dam bao co clang (cgo can cho build Full)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+            choco install llvm -y --no-progress
+            Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+          }
+
+      - name: Build Lite (SAPI5)
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+
+      - name: Build Full (Neural 20 giong)
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Full
+
+      # PATCH: dong goi NGUYEN THU MUC dist (2 exe + 5 dll) thay vi
+      # liet ke tung file - da tranh lam roi DLL khi artifact.
+      # path: dist/*  => artifact phang: giai nen la chay duoc ngay.
+      # Bo dong native-build/onnxruntime.dll vi dist da co san
+      # (build.ps1 copy tu native-build sang dist truoc do);
+      # giu ca hai path se lam artifact bi long thu muc dist/, native-build/.
+      - name: Dong goi ket qua
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HCStudio-exe
+          path: dist/*
+          if-no-files-found: error
