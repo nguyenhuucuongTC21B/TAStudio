@@ -176,6 +176,26 @@ var AssetManifest = []AssetSpec{
 		DestRel:  filepath.Join("update", "vieneu_backbone_shared.data"),
 		SizeHint: 415_319_040, Mandatory: true,
 	},
+	{
+		// PATCH FIX50: denoiser (resemble-enhance denoise, ONNX) cho đường
+		// clone giọng - làm sạch audio mẫu trước khi trích x-vector. Bằng
+		// chứng 2026-09-18: root repo @pin 8b7e9cff, size khớp HEAD,
+		// sha256 b7621953... == LFS oid trên HF. Graph IO: mag/cos/sin
+		// (1,841,T) -> sep_mag/sep_cos/sep_sin (STFT 1680/420).
+		URL:      hfV3Base + "/denoiser.onnx",
+		DestRel:  "denoiser.onnx",
+		SizeHint: 42_661_414, Mandatory: true,
+	},
+	{
+		// PATCH FIX50: speaker encoder xvector 192-d cho đường clone -
+		// trích speaker embedding từ audio mẫu (fbank 80 @16k -> 192-d),
+		// rồi đi qua xvec_w (768x192) của heads.npz thành anchor. sha256
+		// a6ac6a63... == LFS oid. Tổng manifest FIX50: 14 file,
+		// 636.749.792 byte ≈ 607 MB.
+		URL:      hfV3Base + "/speaker_encoder.onnx",
+		DestRel:  "speaker_encoder.onnx",
+		SizeHint: 28_303_423, Mandatory: true,
+	},
 }
 
 // ModelPaths là bộ đường dẫn tuyệt đối dùng cho vieneu_init_params_v2.

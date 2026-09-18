@@ -715,7 +715,7 @@ func (a *App) ImportOfflinePackage() string {
 		return string(b)
 	}
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:   "Chọn gói ZIP chứa trọng số mô hình (12 file)",
+		Title:   "Chọn gói ZIP chứa trọng số mô hình (14 file)",
 		Filters: []wailsruntime.FileFilter{{DisplayName: "Gói weights (.zip)", Pattern: "*.zip"}},
 	})
 	if err != nil || path == "" {
@@ -732,7 +732,7 @@ func (a *App) ImportOfflinePackage() string {
 	defer zr.Close()
 
 	// Bản đồ tên→entry, bỏ qua phần thư mục cha để chấp nhận cả 2 bố trí.
-	// (12 file manifest có tên base đôi một khác nhau — khớp theo tên base an toàn.)
+	// (14 file manifest có tên base đôi một khác nhau — khớp theo tên base an toàn.)
 	byName := map[string]*zip.File{}
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {

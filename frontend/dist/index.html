@@ -3,864 +3,1328 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="light dark" />
 <title>HCStudio v5.0 — VieNeu v3 Turbo</title>
 
 <script>
 /* hcstudio-diag — khối chẩn đoán TỐI GIẢN, cú pháp ES5 thuần */
 (function () {
-  "use strict";
-  var DIAG_TAG = "hcstudio-diag";
-  function goBackend() {
-    try {
-      var c = [];
-      if (window.go && window.go.backend && window.go.backend.App) c.push(window.go.backend.App);
-      if (window.go && window.go.main && window.go.main.App) c.push(window.go.main.App);
-      for (var i = 0; i < c.length; i++) if (typeof c[i].WriteLog === "function") return c[i];
-    } catch (e) {}
-    return null;
-  }
-  function fileLog(level, msg) {
-    try { var b = goBackend(); if (b) b.WriteLog(level, "[ui] " + msg); } catch (e) {}
-    try { console.log("[HCStudio " + level + "] " + msg); } catch (e) {}
-  }
-  function showBanner(text) {
-    try {
-      var old = document.getElementById(DIAG_TAG);
-      if (old && old.parentNode) old.parentNode.removeChild(old);
-      var d = document.createElement("div");
-      d.id = DIAG_TAG;
-      d.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#b3261e;color:#fff;font:13px/1.5 Consolas,monospace;padding:10px 44px 10px 14px;max-height:45vh;overflow:auto;white-space:pre-wrap;";
-      d.textContent = text;
-      var x = document.createElement("button");
-      x.textContent = "X";
-      x.style.cssText = "position:absolute;top:6px;right:8px;background:#fff;color:#b3261e;border:0;border-radius:4px;width:26px;height:26px;cursor:pointer;font-weight:bold;";
-      x.onclick = function () { if (d.parentNode) d.parentNode.removeChild(d); };
-      d.appendChild(x);
-      (document.body || document.documentElement).appendChild(d);
-    } catch (e) {}
-  }
-  window.onerror = function (msg, src, line, col) {
-    showBanner("LỖI SCRIPT GIAO DIỆN:\n" + msg + "\nTại: " + src + " · dòng " + line + " · cột " + col);
-    fileLog("error", "window.onerror: " + msg + " @ " + src + ":" + line + ":" + col);
-    return false;
-  };
-  window.addEventListener("unhandledrejection", function (ev) {
-    var r = ev && ev.reason ? ev.reason : ev;
-    var m = "" + r;
-    showBanner("LỖI PROMISE KHÔNG ĐƯỢC XỬ LÝ:\n" + m);
-    fileLog("error", "unhandledrejection: " + m);
-  });
-  fileLog("info", "diag khối chạy · UA=" + navigator.userAgent);
-  document.addEventListener("DOMContentLoaded", function () {
-    try {
-      var hasHC = !!window.HC;
-      var isWails = hasHC && !!window.HC.isWails;
-      var mode = (hasHC && window.HC.bridge) ? window.HC.bridge.mode : "(không có bridge)";
-      fileLog("info", "DOMContentLoaded: window.HC=" + hasHC + " · isWails=" + isWails + " · bridge.mode=" + mode);
-      if (!hasHC) {
-        showBanner("NGHIÊM TRỌNG: các file JS giao diện không chạy được (window.HC không tồn tại).\nNút Phát sẽ kẹt mờ, wizard tải mô hình không bao giờ hiện.\nXem chi tiết trong hcstudio.log.");
-      } else if (!isWails) {
-        showBanner("CẢNH BÁO: app đang chạy ở CHẾ ĐỘ MOCK — không thấy bindings Wails.\nbridge.mode=" + mode);
-      }
-      wireBridgeLogs();
-    } catch (e) { fileLog("error", "diag DOMContentLoaded lỗi: " + (e && e.message ? e.message : e)); }
-  });
-  function wireBridgeLogs() {
-    try {
-      if (!window.HC || !window.HC.bridge) return;
-      var b = window.HC.bridge;
-      var wrap = function (name) {
-        var orig = b[name];
-        if (typeof orig !== "function" || orig.__hcLogged) return;
-        var logged = function () {
-          var p = orig.apply(this, arguments);
-          if (p && typeof p.then === "function") {
-            p.then(function (r) { fileLog("info", name + " OK"); },
-                   function (e) { fileLog("error", name + " THẤT BẠI: " + e); });
-          }
-          return p;
-        };
-        logged.__hcLogged = true;
-        b[name] = logged;
-      };
-      var names = ["GetAppState","ListVoices","GetSettings","Synthesize","PlayJob","DownloadNeuralAssets","ExportAudio"];
-      for (var i = 0; i < names.length; i++) wrap(names[i]);
-    } catch (e) {}
-  }
+    "use strict";
+    var DIAG_TAG = "hcstudio-diag";
+
+    function goBackend() {
+        try {
+            var c = [];
+            if (window.go && window.go.backend && window.go.backend.App) c.push(window.go.backend.App);
+            if (window.go && window.go.main && window.go.main.App) c.push(window.go.main.App);
+            for (var i = 0; i < c.length; i++) {
+                if (typeof c[i].WriteLog === "function") return c[i];
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    function fileLog(level, msg) {
+        try { var b = goBackend(); if (b) b.WriteLog(level, "[ui] " + msg); } catch (e) {}
+        try { console.log("[HCStudio " + level + "] " + msg); } catch (e) {}
+    }
+
+    function showBanner(text) {
+        try {
+            var old = document.getElementById(DIAG_TAG);
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+            var d = document.createElement("div");
+            d.id = DIAG_TAG;
+            d.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#b3261e;color:#fff;font:13px/1.5 Consolas,monospace;padding:10px 44px 10px 14px;max-height:45vh;overflow:auto;white-space:pre-wrap;";
+            d.textContent = text;
+            var x = document.createElement("button");
+            x.textContent = "X";
+            x.style.cssText = "position:absolute;top:6px;right:8px;background:#fff;color:#b3261e;border:0;border-radius:4px;width:26px;height:26px;cursor:pointer;font-weight:bold;";
+            x.onclick = function () { if (d.parentNode) d.parentNode.removeChild(d); };
+            d.appendChild(x);
+            (document.body || document.documentElement).appendChild(d);
+        } catch (e) {}
+    }
+
+    window.onerror = function (msg, src, line, col) {
+        showBanner("LỖI SCRIPT GIAO DIỆN:\n" + msg + "\nTại: " + src + " · dòng " + line + " · cột " + col);
+        fileLog("error", "window.onerror: " + msg + " @ " + src + ":" + line + ":" + col);
+        return false;
+    };
+    window.addEventListener("unhandledrejection", function (ev) {
+        var r = ev && ev.reason ? ev.reason : ev;
+        var m = "" + r;
+        showBanner("LỖI PROMISE KHÔNG ĐƯỢC XỬ LÝ:\n" + m);
+        fileLog("error", "unhandledrejection: " + m);
+    });
+
+    fileLog("info", "diag khối chạy · UA=" + navigator.userAgent);
+
+    document.addEventListener("DOMContentLoaded", function () {
+        try {
+            var hasHC = !!window.HC;
+            var isWails = hasHC && !!window.HC.isWails;
+            var mode = (hasHC && window.HC.bridge) ? window.HC.bridge.mode : "(không có bridge)";
+            fileLog("info", "DOMContentLoaded: window.HC=" + hasHC + " · isWails=" + isWails + " · bridge.mode=" + mode);
+            if (!hasHC) {
+                showBanner("NGHIÊM TRỌNG: các file JS giao diện không chạy được (window.HC không tồn tại).\nNút Phát sẽ kẹt mờ, wizard tải mô hình không bao giờ hiện.\nXem chi tiết trong hcstudio.log.");
+            } else if (!isWails) {
+                showBanner("CẢNH BÁO: app đang chạy ở CHẾ ĐỘ MOCK — không thấy bindings Wails.\nbridge.mode=" + mode);
+            }
+            wireBridgeLogs();
+        } catch (e) {
+            fileLog("error", "diag DOMContentLoaded lỗi: " + (e && e.message ? e.message : e));
+        }
+    });
+
+    function wireBridgeLogs() {
+        try {
+            if (!window.HC || !window.HC.bridge) return;
+            var b = window.HC.bridge;
+            var wrap = function (name) {
+                var orig = b[name];
+                if (typeof orig !== "function" || orig.__hcLogged) return;
+                var logged = function () {
+                    var p = orig.apply(this, arguments);
+                    if (p && typeof p.then === "function") {
+                        p.then(function (r) { fileLog("info", name + " OK"); },
+                               function (e) { fileLog("error", name + " THẤT BẠI: " + e); });
+                    }
+                    return p;
+                };
+                logged.__hcLogged = true;
+                b[name] = logged;
+            };
+            var names = ["GetAppState", "ListVoices", "GetSettings", "Synthesize",
+                         "PlayJob", "DownloadNeuralAssets", "ExportAudio", "PickRefAudio"];
+            for (var i = 0; i < names.length; i++) wrap(names[i]);
+        } catch (e) {}
+    }
 })();
 </script>
 
-<!-- Cập nhật favicon trỏ về file logo của bạn -->
 <link rel="icon" href="assets/logo.png" />
 
 <style>
 /* ═══════════════════════════════════════════════════════════════
    HCStudio v5.0 — Bảng màu TRANG TRỌNG (Navy · Gold · Red)
    ═══════════════════════════════════════════════════════════════ */
+
+/* ─── 1. BIẾN MÀU & THEME ─────────────────────────────────────── */
 :root{
-  --navy-900:#0a1f3d;
-  --navy-800:#0f2a52;
-  --navy-700:#143566;
-  --navy-600:#1b4b8f;
-  --navy-500:#2563b8;
-  --gold-600:#b8860b;
-  --gold-500:#d4a017;
-  --gold-400:#e6b93a;
-  --gold-300:#f4d06f;
-  --gold-100:#fbeec1;
-  --red-700:#8f0d1f;
-  --red-600:#b31126;
-  --red-500:#c8102e;
-  --ink-900:#0d1b2a;
-  --ink-700:#1f3348;
-  --ink-500:#4a5f76;
-  --ink-300:#8fa3b8;
-  --line:#dfe6ee;
-  --bg:#eef2f7;
-  --card:#ffffff;
-  --card-alt:#f8fafc;
-  --accent:var(--gold-500);
-  --accent-ink:#3a2c00;
-  --shadow-sm:0 1px 2px rgba(13,27,42,.06),0 1px 3px rgba(13,27,42,.06);
-  --shadow-md:0 4px 14px rgba(13,27,42,.08),0 2px 4px rgba(13,27,42,.05);
-  --shadow-lg:0 14px 38px rgba(13,27,42,.14),0 4px 10px rgba(13,27,42,.06);
-  --radius:12px;
-  --radius-lg:16px;
-}
-[data-theme="dark"]{
-  --ink-900:#e8eef6; --ink-700:#c3d0e0; --ink-500:#8fa3b8; --ink-300:#5d7288;
-  --bg:#0b1728; --card:#101f36; --card-alt:#152844; --line:#22385c;
-  --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow-md:0 4px 14px rgba(0,0,0,.5);
-  --shadow-lg:0 14px 38px rgba(0,0,0,.6);
+    color-scheme: light dark;
+
+    --navy-900:#0a1f3d;
+    --navy-800:#0f2a52;
+    --navy-700:#143566;
+    --navy-600:#1b4b8f;
+    --navy-500:#2563b8;
+    --gold-600:#b8860b;
+    --gold-500:#d4a017;
+    --gold-400:#e6b93a;
+    --gold-300:#f4d06f;
+    --gold-100:#fbeec1;
+    --red-700:#8f0d1f;
+    --red-600:#b31126;
+    --red-500:#c8102e;
+    --ink-900:#0d1b2a;
+    --ink-700:#1f3348;
+    --ink-500:#4a5f76;
+    --ink-300:#8fa3b8;
+    --line:#dfe6ee;
+    --bg:#eef2f7;
+    --card:#ffffff;
+    --card-alt:#f8fafc;
+    --accent:var(--gold-500);
+    --accent-ink:#3a2c00;
+
+    --shadow-sm:0 1px 2px rgba(13,27,42,.06),0 1px 3px rgba(13,27,42,.06);
+    --shadow-md:0 4px 14px rgba(13,27,42,.08),0 2px 4px rgba(13,27,42,.05);
+    --shadow-lg:0 14px 38px rgba(13,27,42,.14),0 4px 10px rgba(13,27,42,.06);
+
+    --radius:12px;
+    --radius-lg:16px;
 }
 
-*{box-sizing:border-box;}
-html,body{height:100%;}
-body{
-  margin:0;
-  font-family:"Segoe UI","Inter",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
-  font-size:14px;
-  color:var(--ink-900);
-  background:var(--bg);
-  overflow:hidden;
-  -webkit-font-smoothing:antialiased;
+[data-theme="dark"]{
+    --ink-900:#e8eef6;
+    --ink-700:#c3d0e0;
+    --ink-500:#8fa3b8;
+    --ink-300:#5d7288;
+    --bg:#0b1728;
+    --card:#101f36;
+    --card-alt:#152844;
+    --line:#22385c;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 4px 14px rgba(0,0,0,.5);
+    --shadow-lg:0 14px 38px rgba(0,0,0,.6);
 }
-button{font-family:inherit;}
-i[data-ico]{display:inline-block;width:1em;height:1em;}
+
+/* ─── 2. RESET & BASE ────────────────────────────────────────── */
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+
+body{
+    margin:0;
+    font-family:"Segoe UI","Inter",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    font-size:14px;
+    color:var(--ink-900);
+    background:var(--bg);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+}
+
+button{ font-family:inherit; }
+i[data-ico]{ display:inline-block; width:1em; height:1em; }
+
+/* Focus ring đồng nhất toàn app */
+:focus-visible{
+    outline:2px solid var(--gold-500);
+    outline-offset:2px;
+    border-radius:6px;
+}
 
 /* ═══ SHELL ═══ */
 #app-shell{
-  display:flex;flex-direction:column;height:100vh;
-  background:
-    radial-gradient(1200px 500px at 100% -10%, rgba(212,160,23,.10), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgba(20,53,102,.10), transparent 60%),
-    var(--bg);
+    display:flex;
+    flex-direction:column;
+    height:100vh;
+    background:
+        radial-gradient(1200px 500px at 100% -10%, rgba(212,160,23,.10), transparent 60%),
+        radial-gradient(900px 500px at -10% 110%, rgba(20,53,102,.10), transparent 60%),
+        var(--bg);
 }
 
-/* ═══ TITLEBAR ═══ */
+/* ─── 3. TITLEBAR ────────────────────────────────────────────── */
 .titlebar{
-  flex:0 0 auto;
-  height:56px;
-  display:flex;align-items:center;gap:14px;
-  padding:0 14px 0 12px;
-  background:linear-gradient(180deg,var(--navy-800) 0%,var(--navy-900) 100%);
-  color:#fff;
-  border-bottom:3px solid var(--gold-500);
-  box-shadow:0 2px 10px rgba(10,31,61,.25);
-  position:relative;
+    flex:0 0 auto;
+    height:56px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:0 14px 0 12px;
+    background:linear-gradient(180deg,var(--navy-800) 0%,var(--navy-900) 100%);
+    color:#fff;
+    border-bottom:3px solid var(--gold-500);
+    box-shadow:0 2px 10px rgba(10,31,61,.25);
+    position:relative;
 }
 .titlebar::after{
-  content:"";position:absolute;left:0;right:0;bottom:-3px;height:3px;
-  background:linear-gradient(90deg,transparent,var(--gold-300),var(--gold-500),var(--gold-300),transparent);
-  opacity:.75;
+    content:"";
+    position:absolute;
+    left:0; right:0; bottom:-3px;
+    height:3px;
+    background:linear-gradient(90deg,transparent,var(--gold-300),var(--gold-500),var(--gold-300),transparent);
+    opacity:.75;
 }
-.draggable{-webkit-app-region:drag;app-region:drag;}
-.nodrag{-webkit-app-region:no-drag;app-region:no-drag;}
+.draggable{ -webkit-app-region:drag; app-region:drag; }
+.nodrag{ -webkit-app-region:no-drag; app-region:no-drag; }
 
-.traffic-lights{display:flex;gap:8px;align-items:center;padding-right:6px;}
+.traffic-lights{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    padding-right:6px;
+}
 .tl{
-  width:13px;height:13px;border-radius:50%;border:1px solid rgba(0,0,0,.15);
-  cursor:pointer;padding:0;transition:transform .12s ease,filter .12s ease;
+    width:13px; height:13px;
+    border-radius:50%;
+    border:1px solid rgba(0,0,0,.15);
+    cursor:pointer;
+    padding:0;
+    transition:transform .12s ease, filter .12s ease;
 }
-.tl:hover{filter:brightness(1.15);transform:scale(1.08);}
-.tl-close{background:#ff5f57;}
-.tl-min{background:#febc2e;}
-.tl-max{background:#28c840;}
+.tl:hover{ filter:brightness(1.15); transform:scale(1.08); }
+.tl-close{ background:#ff5f57; }
+.tl-min  { background:#febc2e; }
+.tl-max  { background:#28c840; }
 
-.titlebar-center{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;min-width:0;}
+.titlebar-center{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    min-width:0;
+}
 
-/* ── LOGO (Sử dụng file ảnh từ assets) ── */
+/* ── LOGO ảnh thật từ assets/ ── */
 .logo{
-  width:38px;height:38px;flex:0 0 auto;
-  object-fit:contain; /* Đảm bảo ảnh không bị méo */
-  filter:drop-shadow(0 2px 4px rgba(0,0,0,.4));
-  transition:transform .2s ease;
-  border-radius: 50%; /* Nếu logo của bạn là hình tròn, thuộc tính này sẽ giúp bo tròn khung */
+    width:38px;
+    height:38px;
+    flex:0 0 auto;
+    object-fit:contain;
+    border-radius:50%;
+    filter:drop-shadow(0 2px 4px rgba(0,0,0,.4));
+    transition:transform .2s ease;
 }
-.logo:hover{transform:scale(1.06);}
+.logo:hover{ transform:scale(1.06); }
 
 .app-name{
-  font-size:15px;letter-spacing:.2px;color:#f6f9ff;font-weight:500;
-  white-space:nowrap;
+    font-size:15px;
+    letter-spacing:.2px;
+    color:#f6f9ff;
+    font-weight:500;
+    white-space:nowrap;
 }
-.app-name b{color:var(--gold-300);font-weight:700;}
+.app-name b{ color:var(--gold-300); font-weight:700; }
 
 .engine-pill{
-  margin-left:6px;
-  padding:3px 12px;border-radius:999px;
-  font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
-  background:rgba(255,255,255,.08);
-  border:1px solid rgba(212,160,23,.55);
-  color:var(--gold-300);
-  white-space:nowrap;
+    margin-left:6px;
+    padding:3px 12px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.4px;
+    text-transform:uppercase;
+    background:rgba(255,255,255,.08);
+    border:1px solid rgba(212,160,23,.55);
+    color:var(--gold-300);
+    white-space:nowrap;
 }
-.engine-pill.ok{color:#d7f5c9;border-color:rgba(120,200,90,.6);}
-.engine-pill.warn{color:#ffe1a1;border-color:rgba(230,185,58,.6);}
-.engine-pill.err{color:#ffc4c4;border-color:rgba(200,16,46,.7);}
+.engine-pill.ok  { color:#d7f5c9; border-color:rgba(120,200,90,.6); }
+.engine-pill.warn{ color:#ffe1a1; border-color:rgba(230,185,58,.6); }
+.engine-pill.err { color:#ffc4c4; border-color:rgba(200,16,46,.7); }
 
-.titlebar-actions{display:flex;gap:6px;align-items:center;}
+.titlebar-actions{
+    display:flex;
+    gap:6px;
+    align-items:center;
+}
 .tb-icon-btn{
-  width:32px;height:32px;border-radius:8px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.12);
-  color:#dfe8f5;cursor:pointer;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:all .15s ease;
+    width:32px; height:32px;
+    border-radius:8px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.12);
+    color:#dfe8f5;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    transition:all .15s ease;
 }
-.tb-icon-btn:hover{background:rgba(212,160,23,.18);border-color:var(--gold-500);color:#fff;}
+.tb-icon-btn:hover{
+    background:rgba(212,160,23,.18);
+    border-color:var(--gold-500);
+    color:#fff;
+}
 
-/* ═══ WORKSPACE ═══ */
+/* ─── 4. WORKSPACE ───────────────────────────────────────────── */
 .workspace{
-  flex:1 1 auto;min-height:0;
-  display:grid;grid-template-columns:1fr 400px;
-  gap:16px;padding:18px;
+    flex:1 1 auto;
+    min-height:0;
+    display:grid;
+    grid-template-columns:1fr 400px;
+    gap:16px;
+    padding:18px;
 }
-@media (max-width:1080px){ .workspace{grid-template-columns:1fr;grid-template-rows:1fr auto;} }
+@media (max-width:1080px){
+    .workspace{ grid-template-columns:1fr; grid-template-rows:1fr auto; }
+}
 
+/* ─── Card chung ── */
 .card{
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:var(--radius-lg);
-  box-shadow:var(--shadow-md);
-  display:flex;flex-direction:column;
-  min-height:0;overflow:hidden;
-  position:relative;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius-lg);
+    box-shadow:var(--shadow-md);
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:hidden;
+    position:relative;
 }
 .card::before{
-  content:"";position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,var(--navy-700),var(--gold-500),var(--navy-700));
-  opacity:.9;
+    content:"";
+    position:absolute;
+    top:0; left:0; right:0;
+    height:3px;
+    background:linear-gradient(90deg,var(--navy-700),var(--gold-500),var(--navy-700));
+    opacity:.9;
 }
 .card-head{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 18px 12px;
-  border-bottom:1px solid var(--line);
-  background:linear-gradient(180deg,rgba(212,160,23,.045),transparent);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 18px 12px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(212,160,23,.045),transparent);
 }
 .card-head h2{
-  margin:0;font-size:14px;font-weight:700;
-  letter-spacing:.3px;text-transform:uppercase;color:var(--navy-800);
-  display:flex;align-items:center;gap:9px;
+    margin:0;
+    font-size:14px;
+    font-weight:700;
+    letter-spacing:.3px;
+    text-transform:uppercase;
+    color:var(--navy-800);
+    display:flex;
+    align-items:center;
+    gap:9px;
 }
-[data-theme="dark"] .card-head h2{color:var(--gold-300);}
+[data-theme="dark"] .card-head h2{ color:var(--gold-300); }
+
 .dot-accent{
-  width:8px;height:8px;border-radius:50%;
-  background:radial-gradient(circle at 30% 30%,var(--gold-300),var(--gold-600));
-  box-shadow:0 0 0 3px rgba(212,160,23,.15);
+    width:8px; height:8px;
+    border-radius:50%;
+    background:radial-gradient(circle at 30% 30%,var(--gold-300),var(--gold-600));
+    box-shadow:0 0 0 3px rgba(212,160,23,.15);
 }
 
-.editor-card{flex:1 1 auto;}
-.editor-tools{display:flex;gap:6px;}
+/* ─── Editor ── */
+.editor-card{ flex:1 1 auto; }
+.editor-tools{ display:flex; gap:6px; }
+
 .tool-btn{
-  width:32px;height:32px;border-radius:8px;
-  background:var(--card-alt);
-  border:1px solid var(--line);
-  color:var(--ink-700);cursor:pointer;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:all .15s ease;
+    width:32px; height:32px;
+    border-radius:8px;
+    background:var(--card-alt);
+    border:1px solid var(--line);
+    color:var(--ink-700);
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    transition:all .15s ease;
 }
-.tool-btn:hover{background:var(--gold-100);border-color:var(--gold-500);color:var(--gold-600);}
-[data-theme="dark"] .tool-btn:hover{background:rgba(212,160,23,.15);color:var(--gold-300);}
+.tool-btn:hover{
+    background:var(--gold-100);
+    border-color:var(--gold-500);
+    color:var(--gold-600);
+}
+[data-theme="dark"] .tool-btn:hover{
+    background:rgba(212,160,23,.15);
+    color:var(--gold-300);
+}
 
 #text-input{
-  flex:1;width:100%;min-height:0;resize:none;
-  border:0;outline:0;
-  padding:20px 22px;
-  background:transparent;color:var(--ink-900);
-  font-family:"Segoe UI",system-ui,sans-serif;
-  font-size:15.5px;line-height:1.75;
+    flex:1;
+    width:100%;
+    min-height:0;
+    resize:none;
+    border:0;
+    outline:0;
+    padding:20px 22px;
+    background:transparent;
+    color:var(--ink-900);
+    font-family:"Segoe UI",system-ui,sans-serif;
+    font-size:15.5px;
+    line-height:1.75;
 }
-#text-input::placeholder{color:var(--ink-300);line-height:1.7;}
+#text-input::placeholder{ color:var(--ink-300); line-height:1.7; }
 
 .card-foot{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 18px;
-  border-top:1px solid var(--line);
-  background:var(--card-alt);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:10px 18px;
+    border-top:1px solid var(--line);
+    background:var(--card-alt);
 }
-.counter-wrap{display:flex;gap:8px;align-items:center;}
+.counter-wrap{ display:flex; gap:8px; align-items:center; }
+
 .counter-chip{
-  padding:3px 10px;border-radius:999px;
-  font-size:12px;font-weight:600;
-  background:var(--navy-800);color:var(--gold-300);
-  border:1px solid var(--navy-700);
+    padding:3px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:600;
+    background:var(--navy-800);
+    color:var(--gold-300);
+    border:1px solid var(--navy-700);
 }
-.counter-chip.subtle{background:transparent;color:var(--ink-500);border-color:var(--line);font-weight:500;}
-.kbd-hint{font-size:12px;color:var(--ink-500);}
+.counter-chip.subtle{
+    background:transparent;
+    color:var(--ink-500);
+    border-color:var(--line);
+    font-weight:500;
+}
+
+.kbd-hint{ font-size:12px; color:var(--ink-500); }
 .kbd-hint kbd{
-  display:inline-block;padding:1px 6px;margin:0 2px;
-  font-size:11px;font-family:inherit;
-  background:#fff;color:var(--ink-700);
-  border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;
+    display:inline-block;
+    padding:1px 6px;
+    margin:0 2px;
+    font-size:11px;
+    font-family:inherit;
+    background:#fff;
+    color:var(--ink-700);
+    border:1px solid var(--line);
+    border-bottom-width:2px;
+    border-radius:5px;
 }
 
-/* ── SIDE DECK ── */
+/* ─── Side deck ── */
 .side-deck{
-  display:flex;flex-direction:column;gap:16px;
-  min-height:0;overflow:auto;
-  padding-right:2px;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+    min-height:0;
+    overflow:auto;
+    padding-right:2px;
 }
-.side-deck::-webkit-scrollbar{width:8px;}
-.side-deck::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+.side-deck::-webkit-scrollbar{ width:8px; }
+.side-deck::-webkit-scrollbar-thumb{
+    background:var(--line);
+    border-radius:4px;
+}
 
-.voice-card{flex:0 0 auto;}
-.dropdown{position:relative;margin-top:12px;}
-.dropdown-toggle{
-  width:100%;
-  display:flex;align-items:center;gap:12px;
-  padding:12px 14px;
-  background:linear-gradient(180deg,#fff,var(--card-alt));
-  border:1.5px solid var(--line);
-  border-radius:var(--radius);
-  cursor:pointer;text-align:left;
-  transition:all .15s ease;
+.voice-card{ flex:0 0 auto; }
+
+/* ─── Dropdown chọn giọng ── */
+.dropdown{
+    position:relative;
+    margin-top:12px;
+    padding:0 18px 18px;
 }
-.dropdown-toggle:hover{border-color:var(--gold-500);box-shadow:0 0 0 3px rgba(212,160,23,.12);}
-[data-theme="dark"] .dropdown-toggle{background:var(--card-alt);}
+.dropdown-toggle{
+    width:100%;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:12px 14px;
+    background:linear-gradient(180deg,#fff,var(--card-alt));
+    border:1.5px solid var(--line);
+    border-radius:var(--radius);
+    cursor:pointer;
+    text-align:left;
+    transition:all .15s ease;
+}
+.dropdown-toggle:hover{
+    border-color:var(--gold-500);
+    box-shadow:0 0 0 3px rgba(212,160,23,.12);
+}
+[data-theme="dark"] .dropdown-toggle{ background:var(--card-alt); }
 
 .v-avatar{
-  width:42px;height:42px;border-radius:50%;flex:0 0 auto;
-  display:inline-flex;align-items:center;justify-content:center;
-  font-weight:700;font-size:16px;color:#fff;
-  background:linear-gradient(135deg,var(--navy-600),var(--navy-800));
-  box-shadow:inset 0 0 0 2px rgba(255,255,255,.15),0 2px 6px rgba(10,31,61,.25);
-  position:relative;
+    width:42px; height:42px;
+    border-radius:50%;
+    flex:0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:700;
+    font-size:16px;
+    color:#fff;
+    background:linear-gradient(135deg,var(--navy-600),var(--navy-800));
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.15), 0 2px 6px rgba(10,31,61,.25);
+    position:relative;
 }
-.v-avatar.male{background:linear-gradient(135deg,#1b4b8f,#0a1f3d);}
-.v-avatar.female{background:linear-gradient(135deg,#b31126,#8f0d1f);}
+.v-avatar.male  { background:linear-gradient(135deg,#1b4b8f,#0a1f3d); }
+.v-avatar.female{ background:linear-gradient(135deg,#b31126,#8f0d1f); }
 .v-avatar::after{
-  content:attr(data-initial);
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    content:attr(data-initial);
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
 
-.v-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
-.v-meta strong{font-size:15px;color:var(--ink-900);font-weight:700;letter-spacing:.2px;}
-.v-meta small{font-size:12px;color:var(--ink-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.chev{width:18px;height:18px;fill:none;stroke:var(--ink-500);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;}
+.v-meta{
+    flex:1;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+}
+.v-meta strong{
+    font-size:15px;
+    color:var(--ink-900);
+    font-weight:700;
+    letter-spacing:.2px;
+}
+.v-meta small{
+    font-size:12px;
+    color:var(--ink-500);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+.chev{
+    width:18px; height:18px;
+    fill:none;
+    stroke:var(--ink-500);
+    stroke-width:2.2;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+    flex:0 0 auto;
+}
 
 .dropdown-panel{
-  position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:30;
-  background:var(--card);border:1px solid var(--line);
-  border-radius:var(--radius);
-  box-shadow:var(--shadow-lg);
-  padding:10px;
-  display:none;
+    position:absolute;
+    top:calc(100% + 8px);
+    left:0; right:0;
+    z-index:30;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow-lg);
+    padding:10px;
+    display:none;
 }
-.dropdown.open .dropdown-panel{display:block;animation:dropIn .18s ease;}
-@keyframes dropIn{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:none;}}
+.dropdown.open .dropdown-panel{
+    display:block;
+    animation:dropIn .18s ease;
+}
+@keyframes dropIn{
+    from{ opacity:0; transform:translateY(-6px); }
+    to  { opacity:1; transform:none; }
+}
 #voice-search{
-  width:100%;padding:9px 12px;margin-bottom:8px;
-  border:1px solid var(--line);border-radius:8px;outline:0;
-  background:var(--card-alt);color:var(--ink-900);font-size:13px;
+    width:100%;
+    padding:9px 12px;
+    margin-bottom:8px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    outline:0;
+    background:var(--card-alt);
+    color:var(--ink-900);
+    font-size:13px;
 }
-#voice-search:focus{border-color:var(--gold-500);box-shadow:0 0 0 3px rgba(212,160,23,.15);}
-.voice-list{max-height:280px;overflow:auto;}
-.voice-list::-webkit-scrollbar{width:6px;}
-.voice-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+#voice-search:focus{
+    border-color:var(--gold-500);
+    box-shadow:0 0 0 3px rgba(212,160,23,.15);
+}
+.voice-list{ max-height:280px; overflow:auto; }
+.voice-list::-webkit-scrollbar{ width:6px; }
+.voice-list::-webkit-scrollbar-thumb{
+    background:var(--line);
+    border-radius:3px;
+}
 
-.field-label{
-  display:block;font-size:12px;font-weight:600;letter-spacing:.4px;
-  text-transform:uppercase;color:var(--ink-500);margin-bottom:8px;
+/* ─── Nhân bản giọng (zero-shot clone) ── */
+.ref-clone-row{ padding:0 18px 18px; }
+.ref-clone-row label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    cursor:pointer;
+    font-size:12.5px;
 }
+.ref-clone-row input[type=checkbox]{
+    accent-color:#0A84FF;
+    cursor:pointer;
+}
+#ref-clone-body{ display:none; margin-top:8px; }
+.ref-clone-pick{
+    width:100%;
+    padding:9px 6px;
+    border:1px solid var(--line);
+    background:var(--card-alt);
+    color:var(--ink-700);
+    border-radius:8px;
+    font-size:12.5px;
+    font-weight:600;
+    cursor:pointer;
+    transition:all .15s ease;
+}
+.ref-clone-pick:hover{
+    border-color:var(--gold-500);
+    background:var(--gold-100);
+    color:var(--gold-600);
+}
+[data-theme="dark"] .ref-clone-pick:hover{
+    background:rgba(212,160,23,.15);
+    color:var(--gold-300);
+}
+.ref-clone-name{
+    display:block;
+    margin-top:6px;
+    opacity:.65;
+    font-size:11.5px;
+    word-break:break-all;
+}
+.ref-clone-hint{
+    display:block;
+    margin-top:4px;
+    opacity:.5;
+    font-size:11px;
+}
+.ref-clone-hint strong{ color:var(--gold-600); }
+
+/* ─── Field label & segmented ── */
+.field-label{
+    display:block;
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.4px;
+    text-transform:uppercase;
+    color:var(--ink-500);
+    margin-bottom:8px;
+}
+
 .segmented{
-  display:grid;grid-template-columns:repeat(3,1fr);
-  background:var(--card-alt);
-  border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    background:var(--card-alt);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:3px;
+    gap:2px;
 }
 .seg-btn{
-  padding:9px 6px;border:0;background:transparent;
-  font-size:12.5px;font-weight:600;color:var(--ink-500);
-  border-radius:8px;cursor:pointer;
-  transition:all .15s ease;
+    padding:9px 6px;
+    border:0;
+    background:transparent;
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--ink-500);
+    border-radius:8px;
+    cursor:pointer;
+    transition:all .15s ease;
 }
-.seg-btn:hover{color:var(--ink-900);background:rgba(0,0,0,.03);}
+.seg-btn:hover{
+    color:var(--ink-900);
+    background:rgba(0,0,0,.03);
+}
 .seg-btn.active{
-  background:linear-gradient(180deg,var(--gold-400),var(--gold-500));
-  color:var(--accent-ink);
-  box-shadow:0 1px 4px rgba(184,134,11,.35),inset 0 1px 0 rgba(255,255,255,.4);
+    background:linear-gradient(180deg,var(--gold-400),var(--gold-500));
+    color:var(--accent-ink);
+    box-shadow:0 1px 4px rgba(184,134,11,.35), inset 0 1px 0 rgba(255,255,255,.4);
 }
 
-.sliders-card{flex:0 0 auto;}
-.slider-row{padding:4px 0 14px;}
-.slider-row:last-child{padding-bottom:4px;}
+/* ─── Sliders ── */
+.sliders-card{ flex:0 0 auto; }
+.slider-row{ padding:4px 0 14px; }
+.slider-row:last-child{ padding-bottom:4px; }
+
 .slider-headline{
-  display:flex;justify-content:space-between;align-items:baseline;
-  margin-bottom:8px;
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-bottom:8px;
 }
-.slider-headline label{font-size:13px;font-weight:600;color:var(--ink-700);}
+.slider-headline label{
+    font-size:13px;
+    font-weight:600;
+    color:var(--ink-700);
+}
 .slider-headline output{
-  font-variant-numeric:tabular-nums;
-  font-size:13px;font-weight:700;color:var(--gold-600);
-  background:var(--gold-100);
-  padding:2px 9px;border-radius:6px;
-  border:1px solid rgba(212,160,23,.35);
+    font-variant-numeric:tabular-nums;
+    font-size:13px;
+    font-weight:700;
+    color:var(--gold-600);
+    background:var(--gold-100);
+    padding:2px 9px;
+    border-radius:6px;
+    border:1px solid rgba(212,160,23,.35);
 }
-[data-theme="dark"] .slider-headline output{background:rgba(212,160,23,.15);color:var(--gold-300);}
+[data-theme="dark"] .slider-headline output{
+    background:rgba(212,160,23,.15);
+    color:var(--gold-300);
+}
 
 input[type=range]{
-  -webkit-appearance:none;appearance:none;width:100%;height:6px;
-  border-radius:999px;outline:0;
-  background:linear-gradient(90deg,var(--gold-500) var(--p,50%),var(--line) var(--p,50%));
-  cursor:pointer;
+    -webkit-appearance:none;
+    appearance:none;
+    width:100%;
+    height:6px;
+    border-radius:999px;
+    outline:0;
+    background:linear-gradient(90deg,var(--gold-500) var(--p,50%),var(--line) var(--p,50%));
+    cursor:pointer;
 }
 input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none;
-  width:20px;height:20px;border-radius:50%;
-  background:radial-gradient(circle at 35% 30%,#fff,var(--gold-400) 55%,var(--gold-600));
-  border:2px solid #fff;
-  box-shadow:0 2px 6px rgba(184,134,11,.4);
-  cursor:pointer;transition:transform .12s ease;
+    -webkit-appearance:none;
+    width:20px; height:20px;
+    border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#fff,var(--gold-400) 55%,var(--gold-600));
+    border:2px solid #fff;
+    box-shadow:0 2px 6px rgba(184,134,11,.4);
+    cursor:pointer;
+    transition:transform .12s ease;
 }
-input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.12);}
+input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
+
 .slider-marks{
-  display:flex;justify-content:space-between;
-  margin-top:6px;font-size:11px;color:var(--ink-300);
+    display:flex;
+    justify-content:space-between;
+    margin-top:6px;
+    font-size:11px;
+    color:var(--ink-300);
 }
 
-/* ═══ DOCK ═══ */
+/* ─── 5. DOCK (PROGRESS + TRANSPORT) ─────────────────────────── */
 .dock{
-  flex:0 0 auto;
-  padding:0 18px 16px;
+    flex:0 0 auto;
+    padding:0 18px 16px;
 }
 .progress-line{
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:14px 14px 0 0;
-  border-bottom:0;
-  padding:12px 18px 10px;
-  box-shadow:var(--shadow-sm);
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px 14px 0 0;
+    border-bottom:0;
+    padding:12px 18px 10px;
+    box-shadow:var(--shadow-sm);
 }
 .progress-track{
-  height:8px;border-radius:999px;
-  background:var(--line);
-  overflow:hidden;position:relative;
+    height:8px;
+    border-radius:999px;
+    background:var(--line);
+    overflow:hidden;
+    position:relative;
 }
-.progress-track.thin{height:6px;}
+.progress-track.thin{ height:6px; }
+
 .progress-fill{
-  height:100%;width:var(--w,0%);
-  background:linear-gradient(90deg,var(--navy-600),var(--gold-500));
-  border-radius:999px;
-  transition:width .25s ease;
-  position:relative;
+    height:100%;
+    width:var(--w,0%);
+    background:linear-gradient(90deg,var(--navy-600),var(--gold-500));
+    border-radius:999px;
+    transition:width .25s ease;
+    position:relative;
 }
 .progress-fill::after{
-  content:"";position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);
-  animation:shine 1.8s linear infinite;
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);
+    animation:shine 1.8s linear infinite;
 }
-.progress-fill.dl{background:linear-gradient(90deg,var(--gold-600),var(--gold-300));}
-@keyframes shine{from{transform:translateX(-100%);}to{transform:translateX(100%);}}
+.progress-fill.dl{
+    background:linear-gradient(90deg,var(--gold-600),var(--gold-300));
+}
+@keyframes shine{
+    from{ transform:translateX(-100%); }
+    to  { transform:translateX(100%); }
+}
 
 .progress-meta{
-  display:flex;justify-content:space-between;align-items:baseline;
-  margin-top:8px;font-size:12.5px;
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-top:8px;
+    font-size:12.5px;
 }
-#stage-label{color:var(--ink-500);font-weight:500;}
-#pct-label{color:var(--navy-800);font-weight:700;font-variant-numeric:tabular-nums;}
-[data-theme="dark"] #pct-label{color:var(--gold-300);}
+#stage-label{ color:var(--ink-500); font-weight:500; }
+#pct-label{
+    color:var(--navy-800);
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+}
+[data-theme="dark"] #pct-label{ color:var(--gold-300); }
 
 .transport{
-  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;
-  padding:12px 18px;
-  background:linear-gradient(180deg,var(--navy-800),var(--navy-900));
-  border-radius:0 0 14px 14px;
-  box-shadow:var(--shadow-md);
-  border-top:3px solid var(--gold-500);
+    display:grid;
+    grid-template-columns:1fr auto 1fr;
+    align-items:center;
+    gap:14px;
+    padding:12px 18px;
+    background:linear-gradient(180deg,var(--navy-800),var(--navy-900));
+    border-radius:0 0 14px 14px;
+    box-shadow:var(--shadow-md);
+    border-top:3px solid var(--gold-500);
 }
-.transport-left{display:flex;gap:8px;}
-.transport-center{display:flex;gap:14px;justify-content:center;}
-.transport-right{display:flex;justify-content:flex-end;}
+.transport-left  { display:flex; gap:8px; }
+.transport-center{ display:flex; gap:14px; justify-content:center; }
+.transport-right { display:flex; justify-content:flex-end; }
 
 .export-btn{
-  display:inline-flex;align-items:center;gap:7px;
-  padding:9px 16px;border-radius:10px;
-  background:rgba(255,255,255,.08);
-  border:1.5px solid rgba(212,160,23,.5);
-  color:var(--gold-300);
-  font-size:12.5px;font-weight:700;letter-spacing:.4px;
-  cursor:pointer;transition:all .15s ease;
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    padding:9px 16px;
+    border-radius:10px;
+    background:rgba(255,255,255,.08);
+    border:1.5px solid rgba(212,160,23,.5);
+    color:var(--gold-300);
+    font-size:12.5px;
+    font-weight:700;
+    letter-spacing:.4px;
+    cursor:pointer;
+    transition:all .15s ease;
 }
-.export-btn:hover{background:rgba(212,160,23,.2);border-color:var(--gold-400);color:#fff;transform:translateY(-1px);}
-.export-btn i{font-size:14px;}
+.export-btn:hover{
+    background:rgba(212,160,23,.2);
+    border-color:var(--gold-400);
+    color:#fff;
+    transform:translateY(-1px);
+}
+.export-btn i{ font-size:14px; }
 
 .ctl-btn{
-  width:46px;height:46px;border-radius:50%;
-  border:0;cursor:pointer;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:all .15s ease;
-  color:#fff;
+    width:46px; height:46px;
+    border-radius:50%;
+    border:0;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    transition:all .15s ease;
+    color:#fff;
 }
-.ctl-btn i{font-size:20px;line-height:1;}
-.ctl-btn:disabled{opacity:.35;cursor:not-allowed;filter:grayscale(.6);}
-.ctl-btn.stop{background:linear-gradient(135deg,#5a6b80,#3a4a5e);box-shadow:0 3px 8px rgba(0,0,0,.35);}
-.ctl-btn.stop:hover:not(:disabled){transform:scale(1.06);}
+.ctl-btn i{ font-size:20px; line-height:1; }
+.ctl-btn:disabled{
+    opacity:.35;
+    cursor:not-allowed;
+    filter:grayscale(.6);
+}
+.ctl-btn.stop{
+    background:linear-gradient(135deg,#5a6b80,#3a4a5e);
+    box-shadow:0 3px 8px rgba(0,0,0,.35);
+}
+.ctl-btn.stop:hover:not(:disabled){ transform:scale(1.06); }
 .ctl-btn.play-main{
-  width:58px;height:58px;
-  background:radial-gradient(circle at 35% 30%,var(--gold-300),var(--gold-500) 60%,var(--gold-600));
-  color:var(--accent-ink);
-  box-shadow:0 0 0 3px rgba(212,160,23,.25),0 6px 16px rgba(184,134,11,.5);
+    width:58px; height:58px;
+    background:radial-gradient(circle at 35% 30%,var(--gold-300),var(--gold-500) 60%,var(--gold-600));
+    color:var(--accent-ink);
+    box-shadow:0 0 0 3px rgba(212,160,23,.25), 0 6px 16px rgba(184,134,11,.5);
 }
-.ctl-btn.play-main i{font-size:24px;}
-.ctl-btn.play-main:hover:not(:disabled){transform:scale(1.06);box-shadow:0 0 0 5px rgba(212,160,23,.32),0 8px 20px rgba(184,134,11,.6);}
+.ctl-btn.play-main i{ font-size:24px; }
+.ctl-btn.play-main:hover:not(:disabled){
+    transform:scale(1.06);
+    box-shadow:0 0 0 5px rgba(212,160,23,.32), 0 8px 20px rgba(184,134,11,.6);
+}
 
 .clock{
-  font-variant-numeric:tabular-nums;
-  font-size:13px;font-weight:600;letter-spacing:.5px;
-  color:#cdd9ea;
-  padding:6px 12px;border-radius:8px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.12);
+    font-variant-numeric:tabular-nums;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.5px;
+    color:#cdd9ea;
+    padding:6px 12px;
+    border-radius:8px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.12);
 }
 
-/* ═══ APP FOOTER (TRANG TRỌNG) ═══ */
+/* ─── 6. APP FOOTER (TRANG TRỌNG) ────────────────────────────── */
 .app-footer{
-  flex:0 0 auto;
-  background:linear-gradient(180deg, var(--navy-900), #051024);
-  color:var(--gold-300);
-  font-size:11px;
-  padding:10px 18px;
-  text-align:center;
-  border-top:1px solid rgba(212,160,23,.4);
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  gap:16px;
-  letter-spacing:.3px;
+    flex:0 0 auto;
+    background:linear-gradient(180deg,var(--navy-900),#051024);
+    color:var(--gold-300);
+    font-size:11px;
+    line-height:1.5;
+    padding:10px 18px;
+    text-align:center;
+    border-top:1px solid rgba(212,160,23,.4);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:6px 16px;
+    letter-spacing:.3px;
+    text-wrap:balance;
 }
-.app-footer span{opacity:.85;}
-.app-footer .sep{opacity:.4;}
-.app-footer b{color:#fff;font-weight:600;}
+.app-footer span{
+    opacity:.85;
+    white-space:nowrap;
+}
+.app-footer .sep{ opacity:.4; }
+.app-footer b{ color:#fff; font-weight:600; }
 
-/* ═══ WIZARD ═══ */
+/* ─── 7. WIZARD ──────────────────────────────────────────────── */
 .overlay{
-  position:fixed;inset:0;z-index:100;
-  background:rgba(10,31,61,.72);
-  backdrop-filter:blur(6px);
-  display:flex;align-items:center;justify-content:center;
-  padding:24px;
+    position:fixed;
+    inset:0;
+    z-index:100;
+    background:rgba(10,31,61,.72);
+    backdrop-filter:blur(6px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
 }
-.overlay[hidden]{display:none;}
+.overlay[hidden]{ display:none; }
+
 .wizard{
-  max-width:560px;width:100%;
-  padding:34px 34px 26px;
-  border-radius:20px;
-  background:var(--card);
-  border-top:5px solid var(--gold-500);
-  box-shadow:var(--shadow-lg);
-  animation:wizIn .35s cubic-bezier(.2,.9,.3,1.2);
+    max-width:560px;
+    width:100%;
+    padding:34px 34px 26px;
+    border-radius:20px;
+    background:var(--card);
+    border-top:5px solid var(--gold-500);
+    box-shadow:var(--shadow-lg);
+    animation:wizIn .35s cubic-bezier(.2,.9,.3,1.2);
 }
-@keyframes wizIn{from{opacity:0;transform:translateY(20px) scale(.97);}to{opacity:1;transform:none;}}
+@keyframes wizIn{
+    from{ opacity:0; transform:translateY(20px) scale(.97); }
+    to  { opacity:1; transform:none; }
+}
+
 .wizard h1{
-  margin:0 0 10px;font-size:23px;line-height:1.3;color:var(--navy-800);
-  letter-spacing:-.2px;
+    margin:0 0 10px;
+    font-size:23px;
+    line-height:1.3;
+    color:var(--navy-800);
+    letter-spacing:-.2px;
 }
-[data-theme="dark"] .wizard h1{color:var(--gold-300);}
-.wiz-sub{margin:0 0 18px;color:var(--ink-500);font-size:14px;line-height:1.7;}
-.wiz-sub b{color:var(--gold-600);}
+[data-theme="dark"] .wizard h1{ color:var(--gold-300); }
+
+.wiz-sub{
+    margin:0 0 18px;
+    color:var(--ink-500);
+    font-size:14px;
+    line-height:1.7;
+}
+.wiz-sub b{ color:var(--gold-600); }
+
 .wiz-features{
-  margin:0 0 22px;padding:16px 20px;
-  list-style:none;
-  background:var(--card-alt);
-  border-left:4px solid var(--gold-500);
-  border-radius:8px;
+    margin:0 0 22px;
+    padding:16px 20px;
+    list-style:none;
+    background:var(--card-alt);
+    border-left:4px solid var(--gold-500);
+    border-radius:8px;
 }
 .wiz-features li{
-  padding:5px 0 5px 22px;position:relative;
-  font-size:13.5px;color:var(--ink-700);line-height:1.5;
+    padding:5px 0 5px 22px;
+    position:relative;
+    font-size:13.5px;
+    color:var(--ink-700);
+    line-height:1.5;
 }
 .wiz-features li::before{
-  content:"";position:absolute;left:0;top:11px;
-  width:10px;height:10px;
-  background:radial-gradient(circle at 30% 30%,var(--gold-300),var(--gold-600));
-  border-radius:50%;
+    content:"";
+    position:absolute;
+    left:0; top:11px;
+    width:10px; height:10px;
+    background:radial-gradient(circle at 30% 30%,var(--gold-300),var(--gold-600));
+    border-radius:50%;
 }
 
-.dl-progress{margin-bottom:18px;padding:14px 16px;background:var(--card-alt);border-radius:10px;border:1px solid var(--line);}
-.dl-file-row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-700);font-weight:600;margin-bottom:9px;}
-.dl-file-row span:last-child{color:var(--ink-500);font-weight:500;}
-.dl-bytes-row{display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--ink-500);font-variant-numeric:tabular-nums;}
-.dl-bytes-row span:last-child{font-weight:700;color:var(--gold-600);}
+.dl-progress{
+    margin-bottom:18px;
+    padding:14px 16px;
+    background:var(--card-alt);
+    border-radius:10px;
+    border:1px solid var(--line);
+}
+.dl-file-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:12.5px;
+    color:var(--ink-700);
+    font-weight:600;
+    margin-bottom:9px;
+}
+.dl-file-row span:last-child{ color:var(--ink-500); font-weight:500; }
 
-.wiz-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:6px;}
+.dl-bytes-row{
+    display:flex;
+    justify-content:space-between;
+    margin-top:8px;
+    font-size:12px;
+    color:var(--ink-500);
+    font-variant-numeric:tabular-nums;
+}
+.dl-bytes-row span:last-child{
+    font-weight:700;
+    color:var(--gold-600);
+}
+
+.wiz-actions{
+    display:flex;
+    gap:12px;
+    justify-content:flex-end;
+    margin-top:6px;
+    flex-wrap:wrap;
+}
 .btn{
-  padding:11px 22px;border-radius:10px;border:1.5px solid transparent;
-  font-size:13.5px;font-weight:700;letter-spacing:.3px;cursor:pointer;
-  transition:all .15s ease;
+    padding:11px 22px;
+    border-radius:10px;
+    border:1.5px solid transparent;
+    font-size:13.5px;
+    font-weight:700;
+    letter-spacing:.3px;
+    cursor:pointer;
+    transition:all .15s ease;
 }
-.btn.ghost{background:transparent;border-color:var(--line);color:var(--ink-700);}
-.btn.ghost:hover{border-color:var(--navy-600);color:var(--navy-700);}
+.btn.ghost{
+    background:transparent;
+    border-color:var(--line);
+    color:var(--ink-700);
+}
+.btn.ghost:hover{
+    border-color:var(--navy-600);
+    color:var(--navy-700);
+}
 .btn.primary{
-  background:linear-gradient(180deg,var(--gold-400),var(--gold-600));
-  color:var(--accent-ink);
-  box-shadow:0 3px 10px rgba(184,134,11,.4);
+    background:linear-gradient(180deg,var(--gold-400),var(--gold-600));
+    color:var(--accent-ink);
+    box-shadow:0 3px 10px rgba(184,134,11,.4);
 }
-.btn.primary:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(184,134,11,.5);}
+.btn.primary:hover{
+    transform:translateY(-1px);
+    box-shadow:0 5px 14px rgba(184,134,11,.5);
+}
 
-/* ═══ TOASTS ═══ */
+/* ─── 8. TOASTS ──────────────────────────────────────────────── */
 .toasts{
-  position:fixed;bottom:22px;right:22px;z-index:200;
-  display:flex;flex-direction:column;gap:10px;pointer-events:none;
+    position:fixed;
+    bottom:22px;
+    right:22px;
+    z-index:200;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    pointer-events:none;
 }
 .toasts > *{
-  pointer-events:auto;
-  min-width:260px;max-width:380px;
-  padding:13px 16px;
-  background:var(--card);
-  border-left:4px solid var(--navy-600);
-  border-radius:10px;
-  box-shadow:var(--shadow-lg);
-  font-size:13.5px;color:var(--ink-900);
-  animation:toastIn .28s cubic-bezier(.2,.9,.3,1.2);
+    pointer-events:auto;
+    min-width:260px;
+    max-width:380px;
+    padding:13px 16px;
+    background:var(--card);
+    border-left:4px solid var(--navy-600);
+    border-radius:10px;
+    box-shadow:var(--shadow-lg);
+    font-size:13.5px;
+    color:var(--ink-900);
+    animation:toastIn .28s cubic-bezier(.2,.9,.3,1.2);
 }
-@keyframes toastIn{from{opacity:0;transform:translateX(30px);}to{opacity:1;transform:none;}}
+@keyframes toastIn{
+    from{ opacity:0; transform:translateX(30px); }
+    to  { opacity:1; transform:none; }
+}
 
-/* Scrollbar toàn cục */
-*::-webkit-scrollbar{width:10px;height:10px;}
-*::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;border:2px solid var(--bg);}
-*::-webkit-scrollbar-thumb:hover{background:var(--ink-300);}
+/* ─── 9. SCROLLBAR toàn cục ──────────────────────────────────── */
+*::-webkit-scrollbar{ width:10px; height:10px; }
+*::-webkit-scrollbar-thumb{
+    background:var(--line);
+    border-radius:6px;
+    border:2px solid var(--bg);
+}
+*::-webkit-scrollbar-thumb:hover{ background:var(--ink-300); }
+
+/* ─── 10. TÔN TRỌNG prefers-reduced-motion ───────────────────── */
+@media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{
+        animation-duration:.001ms !important;
+        animation-iteration-count:1 !important;
+        transition-duration:.001ms !important;
+        scroll-behavior:auto !important;
+    }
+}
 </style>
 </head>
 
 <body>
 <div id="app-shell">
 
-  <!-- ═══════════ TITLEBAR ═══════════ -->
-  <header class="titlebar draggable">
-    <div class="traffic-lights nodrag">
-      <button id="btn-win-close" class="tl tl-close" title="Đóng" aria-label="Đóng"></button>
-      <button id="btn-win-min"   class="tl tl-min"   title="Thu nhỏ" aria-label="Thu nhỏ"></button>
-      <button id="btn-win-max"   class="tl tl-max"   title="Phóng to" aria-label="Phóng to"></button>
-    </div>
-
-    <div class="titlebar-center">
-      <!-- SỬ DỤNG FILE LOGO THẬT TỪ THƯ MỤC ASSETS -->
-      <!-- Lưu ý: Đổi 'logo.png' thành tên file thực tế của bạn (ví dụ: logo.jpg, logo.svg) -->
-      <img src="assets/logo.png" class="logo" alt="Logo" />
-      
-      <span class="app-name">HCStudio <b>v5.0</b></span>
-      <span id="engine-pill" class="engine-pill" title="Trạng thái engine neural">…</span>
-    </div>
-
-    <div class="titlebar-actions nodrag">
-      <button id="btn-models" class="tb-icon-btn" title="Thư mục mô hình"></button>
-      <button id="btn-theme"  class="tb-icon-btn" title="Chuyển chế độ sáng/tối"></button>
-    </div>
-  </header>
-
-    <!-- ══════════════ MAIN: 2 vùng (trái nhập liệu / phải điều khiển) ══════════════ -->
-    <main class="workspace">
-
-      <!-- LEFT · Khung nhập liệu -->
-      <section class="card editor-card">
-        <div class="card-head">
-          <h2><span class="dot-accent"></span> Văn bản</h2>
-          <div class="editor-tools">
-            <button id="btn-paste" class="tool-btn" title="Dán từ clipboard"></button>
-            <button id="btn-clear" class="tool-btn" title="Xoá toàn bộ"></button>
-          </div>
+    <!-- ═══════════ TITLEBAR ═══════════ -->
+    <header class="titlebar draggable">
+        <div class="traffic-lights nodrag">
+            <button id="btn-win-close" class="tl tl-close" title="Đóng" aria-label="Đóng"></button>
+            <button id="btn-win-min"   class="tl tl-min"   title="Thu nhỏ" aria-label="Thu nhỏ"></button>
+            <button id="btn-win-max"   class="tl tl-max"   title="Phóng to" aria-label="Phóng to"></button>
         </div>
 
-        <textarea id="text-input" spellcheck="false"
-          placeholder="Dán hoặc nhập văn bản tiếng Việt ở đây…
+        <div class="titlebar-center">
+            <!-- LOGO THẬT TỪ assets/logo.png -->
+            <img src="assets/logo.png" class="logo" alt="Logo HCStudio" />
+            <span class="app-name">HCStudio <b>v5.0</b></span>
+            <span id="engine-pill" class="engine-pill" title="Trạng thái engine neural">…</span>
+        </div>
+
+        <div class="titlebar-actions nodrag">
+            <button id="btn-models" class="tb-icon-btn" title="Thư mục mô hình" aria-label="Thư mục mô hình"></button>
+            <button id="btn-theme"  class="tb-icon-btn" title="Chuyển chế độ sáng/tối" aria-label="Đổi giao diện"></button>
+        </div>
+    </header>
+
+    <!-- ═══════════ WORKSPACE ═══════════ -->
+    <main class="workspace">
+
+        <!-- LEFT · Văn bản nguồn -->
+        <section class="card editor-card">
+            <div class="card-head">
+                <h2><span class="dot-accent"></span> Văn bản</h2>
+                <div class="editor-tools">
+                    <button id="btn-paste" class="tool-btn" title="Dán từ clipboard" aria-label="Dán"></button>
+                    <button id="btn-clear" class="tool-btn" title="Xoá toàn bộ" aria-label="Xoá"></button>
+                </div>
+            </div>
+
+            <textarea id="text-input" spellcheck="false" aria-label="Văn bản nguồn"
+                placeholder="Dán hoặc nhập văn bản tiếng Việt ở đây…
 
 • Hỗ trợ văn bản dài không giới hạn thực tế (tự tách câu để đọc mượt).
 • Cú pháp cảm xúc của VieNeu v3 hoạt động trực tiếp: ví dụ “Nghe hay quá [cười]!”
 • Ctrl+Enter để phát nhanh không cần rời tay khỏi bàn phím."></textarea>
 
-        <div class="card-foot">
-          <div class="counter-wrap">
-            <span id="char-count" class="counter-chip">0 ký tự</span>
-            <span id="eta-chip" class="counter-chip subtle" hidden></span>
-          </div>
-          <span class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> Phát</span>
-        </div>
-      </section>
-
-      <!-- RIGHT · Bảng điều khiển giọng -->
-      <aside class="side-deck">
-
-        <!-- Voice picker -->
-        <section class="card voice-card">
-          <div class="card-head">
-            <h2><span class="dot-accent"></span> Giọng đọc</h2>
-            <span id="voice-count-chip" class="counter-chip subtle">25 giọng</span>
-          </div>
-
-          <div class="dropdown" id="voice-dropdown">
-            <button type="button" class="dropdown-toggle" id="voice-toggle">
-              <span id="voice-avatar" class="v-avatar male" data-initial="A"></span>
-              <span class="v-meta">
-                <strong id="voice-current-name">Adam</strong>
-                <small id="voice-current-desc">Nam · Nam · Giọng đọc tự nhiên</small>
-              </span>
-              <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-            </button>
-
-            <div class="dropdown-panel" id="voice-panel" role="listbox" tabindex="-1">
-              <input id="voice-search" type="text" placeholder="Tìm giọng đọc…" autocomplete="off" />
-              <div class="voice-list" id="voice-list"><!-- render động --></div>
+            <div class="card-foot">
+                <div class="counter-wrap">
+                    <span id="char-count" class="counter-chip">0 ký tự</span>
+                    <span id="eta-chip" class="counter-chip subtle" hidden></span>
+                </div>
+                <span class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> Phát</span>
             </div>
-          </div>
-
-          <!-- PATCH FIX46: nhân bản giọng (zero-shot clone, thử nghiệm) -->
-          <div class="ref-clone-row" id="ref-clone-row" style="margin-top:12px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px">
-              <input type="checkbox" id="ref-clone-check" style="accent-color:#0A84FF" />
-              <span><strong>Nhân bản giọng</strong> <small style="opacity:.6">(thử nghiệm)</small></span>
-            </label>
-            <div id="ref-clone-body" style="display:none;margin-top:8px">
-              <button type="button" class="seg-btn" id="ref-clone-pick" style="width:100%">Chọn file WAV mẫu (3–8s)…</button>
-              <small id="ref-clone-name" style="display:block;margin-top:6px;opacity:.65;font-size:11.5px;word-break:break-all">Chưa chọn file</small>
-              <small style="display:block;margin-top:4px;opacity:.5;font-size:11px">Audio mẫu nên dài <strong>3–5 giây</strong> (một câu nói rõ, ít ồn). Dài hơn 8s app sẽ tự cắt. WAV PCM, mono/stereo.</small>
-            </div>
-          </div>
-
-          <label class="field-label" style="margin-top:14px">Lõi xử lý (Engine)</label>
-          <div class="segmented" id="engine-segmented">
-            <button data-engine="auto"   class="seg-btn active">Tự động</button>
-            <button data-engine="neural" class="seg-btn">Neural</button>
-            <button data-engine="sapi"   class="seg-btn">Ultra-Lite</button>
-          </div>
         </section>
 
-        <!-- Sliders -->
-        <section class="card sliders-card">
-          <div class="card-head"><h2><span class="dot-accent"></span> Thông số</h2></div>
+        <!-- RIGHT · Bảng điều khiển giọng -->
+        <aside class="side-deck">
 
-          <div class="slider-row">
-            <div class="slider-headline">
-              <label>Tốc độ đọc</label><output id="out-speed">1.00×</output>
-            </div>
-            <input type="range" id="sl-speed" min="0.5" max="2" step="0.05" value="1" />
-          </div>
+            <!-- Voice picker -->
+            <section class="card voice-card">
+                <div class="card-head">
+                    <h2><span class="dot-accent"></span> Giọng đọc</h2>
+                    <span id="voice-count-chip" class="counter-chip subtle">25 giọng</span>
+                </div>
 
-          <div class="slider-row">
-            <div class="slider-headline">
-              <label>Cao độ</label><output id="out-pitch">0 semitone</output>
-            </div>
-            <input type="range" id="sl-pitch" min="-12" max="12" step="0.5" value="0" />
-            <div class="slider-marks"><span>Trầm −12</span><span>0</span><span>+12 Cao</span></div>
-          </div>
+                <div class="dropdown" id="voice-dropdown">
+                    <button type="button" class="dropdown-toggle" id="voice-toggle">
+                        <span id="voice-avatar" class="v-avatar male" data-initial="A"></span>
+                        <span class="v-meta">
+                            <strong id="voice-current-name">Adam</strong>
+                            <small id="voice-current-desc">Nam · Nam · Giọng đọc tự nhiên</small>
+                        </span>
+                        <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
 
-          <div class="slider-row">
-            <div class="slider-headline">
-              <label>Âm lượng</label><output id="out-volume">90%</output>
-            </div>
-            <input type="range" id="sl-volume" min="0" max="100" step="1" value="90" />
-          </div>
-        </section>
-      </aside>
+                    <div class="dropdown-panel" id="voice-panel" role="listbox" tabindex="-1">
+                        <input id="voice-search" type="text" placeholder="Tìm giọng đọc…" autocomplete="off" />
+                        <div class="voice-list" id="voice-list"><!-- render động --></div>
+                    </div>
+                </div>
+
+                <!-- Nhân bản giọng (zero-shot clone, thử nghiệm) -->
+                <div class="ref-clone-row" id="ref-clone-row">
+                    <label>
+                        <input type="checkbox" id="ref-clone-check" />
+                        <span><strong>Nhân bản giọng</strong> <small style="opacity:.6">(thử nghiệm)</small></span>
+                    </label>
+                    <div id="ref-clone-body">
+                        <button type="button" class="ref-clone-pick" id="ref-clone-pick">Chọn file WAV mẫu (3–8s)…</button>
+                        <small id="ref-clone-name" class="ref-clone-name">Chưa chọn file</small>
+                        <small class="ref-clone-hint">Audio mẫu nên dài <strong>3–5 giây</strong> (một câu nói rõ, ít ồn). Dài hơn 8s app sẽ tự cắt. WAV PCM, mono/stereo.</small>
+                    </div>
+                </div>
+
+                <div style="padding:0 18px 18px;">
+                    <label class="field-label">Lõi xử lý (Engine)</label>
+                    <div class="segmented" id="engine-segmented">
+                        <button data-engine="auto"   class="seg-btn active">Tự động</button>
+                        <button data-engine="neural" class="seg-btn">Neural</button>
+                        <button data-engine="sapi"   class="seg-btn">Ultra-Lite</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sliders -->
+            <section class="card sliders-card">
+                <div class="card-head"><h2><span class="dot-accent"></span> Thông số</h2></div>
+
+                <div style="padding:14px 18px 18px;">
+                    <div class="slider-row">
+                        <div class="slider-headline">
+                            <label for="sl-speed">Tốc độ đọc</label>
+                            <output id="out-speed">1.00×</output>
+                        </div>
+                        <input type="range" id="sl-speed" min="0.5" max="2" step="0.05" value="1" />
+                    </div>
+
+                    <div class="slider-row">
+                        <div class="slider-headline">
+                            <label for="sl-pitch">Cao độ</label>
+                            <output id="out-pitch">0 semitone</output>
+                        </div>
+                        <input type="range" id="sl-pitch" min="-12" max="12" step="0.5" value="0" />
+                        <div class="slider-marks">
+                            <span>Trầm −12</span><span>0</span><span>+12 Cao</span>
+                        </div>
+                    </div>
+
+                    <div class="slider-row">
+                        <div class="slider-headline">
+                            <label for="sl-volume">Âm lượng</label>
+                            <output id="out-volume">90%</output>
+                        </div>
+                        <input type="range" id="sl-volume" min="0" max="100" step="1" value="90" />
+                    </div>
+                </div>
+            </section>
+        </aside>
     </main>
 
-    <!-- ══════════════ PROGRESS + TRANSPORT ══════════════ -->
+    <!-- ═══════════ PROGRESS + TRANSPORT ═══════════ -->
     <footer class="dock">
-    <div class="progress-line" id="progress-line">
-      <div class="progress-track">
-        <div class="progress-fill" id="progress-fill" style="--w:0%"></div>
-      </div>
-      <div class="progress-meta">
-        <span id="stage-label">Sẵn sàng</span>
-        <span id="pct-label" class="pct">0%</span>
-      </div>
+        <div class="progress-line" id="progress-line">
+            <div class="progress-track">
+                <div class="progress-fill" id="progress-fill" style="--w:0%"></div>
+            </div>
+            <div class="progress-meta">
+                <span id="stage-label">Sẵn sàng</span>
+                <span id="pct-label">0%</span>
+            </div>
+        </div>
+
+        <div class="transport">
+            <div class="transport-left">
+                <button id="btn-export-wav" class="export-btn" title="Xuất file WAV chất lượng gốc">
+                    <i data-ico="wav"></i><span>WAV</span>
+                </button>
+                <button id="btn-export-mp3" class="export-btn" title="Xuất file MP3 gọn nhẹ">
+                    <i data-ico="mp3"></i><span>MP3</span>
+                </button>
+            </div>
+
+            <div class="transport-center">
+                <button id="btn-stop" class="ctl-btn stop" title="Dừng lại" disabled>
+                    <i data-ico="stop"></i>
+                </button>
+                <button id="btn-play" class="ctl-btn play-main" title="Phát / Tạm dừng" disabled>
+                    <i data-ico="play" class="ico-play"></i>
+                    <i data-ico="pause" class="ico-pause" hidden></i>
+                </button>
+            </div>
+
+            <div class="transport-right">
+                <span id="clock-label" class="clock">0:00 / 0:00</span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ═══════════ APP FOOTER (TRANG TRỌNG) ═══════════ -->
+    <div class="app-footer">
+        <span>© 2026 <b>HCStudio v5.0 Liên hệ: 0905 6666 24</b></span>
+        <span class="sep">|</span>
+        <span>© Coder &amp; Developt by <b>Nguyễn Hữu Cường - CV KTCC CY - BP CĐS</b></span>
+        <span class="sep">|</span>
+        <span>Viện Kiểm sát nhân dân thành phố Đà Nẵng</span>
+        <span class="sep">|</span>
+        <span>Bản quyền được bảo hộ bởi Cục Sở hữu trí tuệ Việt Nam</span>
     </div>
 
-    <div class="transport">
-      <div class="transport-left">
-        <button id="btn-export-wav" class="export-btn" title="Xuất file WAV chất lượng gốc">
-          <i data-ico="wav"></i><span>WAV</span>
-        </button>
-        <button id="btn-export-mp3" class="export-btn" title="Xuất file MP3 gọn nhẹ">
-          <i data-ico="mp3"></i><span>MP3</span>
-        </button>
-      </div>
-
-      <div class="transport-center">
-        <button id="btn-stop" class="ctl-btn stop" title="Dừng lại" disabled>
-          <i data-ico="stop"></i>
-        </button>
-        <button id="btn-play" class="ctl-btn play-main" title="Phát / Tạm dừng" disabled>
-          <i data-ico="play" class="ico-play"></i><i data-ico="pause" class="ico-pause" hidden></i>
-        </button>
-      </div>
-
-      <div class="transport-right">
-        <span id="clock-label" class="clock">0:00 / 0:00</span>
-      </div>
-    </div>
-  </footer>
-
-  <!-- ═══════════ APP FOOTER (TRANG TRỌNG) ═══════════ -->
-  <div class="app-footer">
-    <span>© 2026 <b>HCStudio v5.0 Liên hệ: 0905 6666 24</b></span>
-    <span class="sep">|</span>
-	<span>© Coder & Developt by <b>Nguyễn Hữu Cường - CV KTCC CY - BP CĐS</b></span>
-    <span class="sep">|</span>
-    <span>Viện Kiểm sát nhân dân thành phố Đà Nẵng</span>
-    <span class="sep">|</span>
-    <span>Bản quyền được bảo hộ bởi Cục Sở hữu trí tuệ Việt Nam</span>
-  </div>
-
-    <!-- ══════════════ SETUP WIZARD (khi thiếu model) ══════════════ -->
+    <!-- ═══════════ SETUP WIZARD ═══════════ -->
     <div class="overlay" id="setup-overlay" hidden>
-      <div class="wizard card">
-        <h1 id="wiz-title">Chào mừng đến HCStudio v5.0 🎙️</h1>
-        <p class="wiz-sub" id="wiz-sub">
-          Bộ 20 giọng neural tiếng Việt <b>VieNeu v3 Turbo</b> (chất lượng 48 kHz,
-          tự nhiên như người thật) cần tải trọng số một lần duy nhất
-          (<span id="wiz-size">≈ 520 MB · 12 file</span>) rồi sống hoàn toàn offline trong máy bạn.
-          <!-- PATCH run #31: "≈ 1 GB" là ước lượng cũ theo toàn bộ repo HF; manifest thật của app là 546.433.245 byte ≈ 521 MB. -->
-        </p>
+        <div class="wizard card">
+            <h1 id="wiz-title">Chào mừng đến HCStudio v5.0 🎙️</h1>
+            <p class="wiz-sub" id="wiz-sub">
+                Bộ 20 giọng neural tiếng Việt <b>VieNeu v3 Turbo</b> (chất lượng 48 kHz,
+                tự nhiên như người thật) cần tải trọng số một lần duy nhất
+                (<span id="wiz-size">≈ 520 MB · 12 file</span>) rồi sống hoàn toàn offline trong máy bạn.
+            </p>
 
-        <ul class="wiz-features">
-          <li>Tầng Ultra-Lite (giọng Windows SAPI5) dùng được ngay mà không cần tải gì.</li>
-          <li>Bản tải bị đứt giữa chừng sẽ tự nối tiếp — thoát app cũng được.</li>
-          <li>Không mạng sau khi cài xong; mọi dữ liệu nằm tại máy người dùng.</li>
-        </ul>
+            <ul class="wiz-features">
+                <li>Tầng Ultra-Lite (giọng Windows SAPI5) dùng được ngay mà không cần tải gì.</li>
+                <li>Bản tải bị đứt giữa chừng sẽ tự nối tiếp — thoát app cũng được.</li>
+                <li>Không mạng sau khi cài xong; mọi dữ liệu nằm tại máy người dùng.</li>
+            </ul>
 
-        <div class="dl-progress" id="dl-progress" hidden>
-          <div class="dl-file-row"><span id="dl-file">—</span><span id="dl-files-idx"></span></div>
-          <div class="progress-track thin">
-            <div class="progress-fill dl" id="dl-fill" style="--w:0%"></div>
-          </div>
-          <div class="dl-bytes-row"><span id="dl-bytes">0 B / 0 B</span><span id="dl-pct">0%</span></div>
+            <div class="dl-progress" id="dl-progress" hidden>
+                <div class="dl-file-row"><span id="dl-file">—</span><span id="dl-files-idx"></span></div>
+                <div class="progress-track thin">
+                    <div class="progress-fill dl" id="dl-fill" style="--w:0%"></div>
+                </div>
+                <div class="dl-bytes-row"><span id="dl-bytes">0 B / 0 B</span><span id="dl-pct">0%</span></div>
+            </div>
+
+            <div class="wiz-actions">
+                <button id="wiz-skip"   class="btn ghost">Dùng Ultra-Lite trước</button>
+                <button id="wiz-import" class="btn ghost" title="Nhập gói ZIP trọng số tải từ nguồn của riêng bạn (không cần mạng)">Nhập gói ZIP (offline)</button>
+                <button id="wiz-dl"     class="btn primary">Tải mô hình neural</button>
+            </div>
         </div>
-
-        <div class="wiz-actions">
-          <button id="wiz-skip"  class="btn ghost">Dùng Ultra-Lite trước</button>
-          <button id="wiz-import" class="btn ghost" title="Nhập gói ZIP trọng số tải từ nguồn của riêng bạn (không cần mạng)">Nhập gói ZIP (offline)</button>
-          <button id="wiz-dl"    class="btn primary">Tải mô hình neural</button>
-        </div>
-      </div>
     </div>
 
     <!-- Toasts -->
     <div class="toasts" id="toasts"></div>
-  </div>
+</div>
 
-  <script src="assets/js/bridge.js"></script>
-  <script src="assets/js/icons.js"></script>
-  <script src="assets/js/state.js"></script>
-  <script src="assets/js/ui.js"></script>
-  <script src="assets/js/main.js"></script>
+<script src="assets/js/bridge.js"></script>
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/state.js"></script>
+<script src="assets/js/ui.js"></script>
+<script src="assets/js/main.js"></script>
 </body>
 </html>
