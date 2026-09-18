@@ -243,6 +243,8 @@
 #>
 param(
     [switch]$Full,
+    [switch]$DebugExe, # PATCH FIX51: chi build HCStudio-debug.exe khi co co nay
+    
     [switch]$Clean,
     # run #44: quay lai 1.20.1 - PHAI khop voi default trong
     # prepare-vieneu.ps1. ORT 1.24.4 crash 100% trong vieneu_init_v2
@@ -754,7 +756,7 @@ try {
     #   1) chay HCStudio-debug.exe, bam tao giong doc de reproduce;
     #   2) copy/screenshot dong cuoi trong cua so console;
     #   3) gui nguoc lai - dong do chi dinh dung cho crash nam o dau.
-    if ($Full) {
+    if ($Full -and $DebugExe) { # PATCH FIX51: mac dinh KHONG build debug exe - dist chi con HCStudio.exe
         $dbgLdflags = "-s -w"   # khong -H windowsgui => subsystem console
         & go build -trimpath -tags ($wailsTags + ",vieneu") -ldflags "$dbgLdflags" -o (Join-Path $DistDir "HCStudio-debug.exe") .
         if ($LASTEXITCODE -ne 0) {
@@ -765,6 +767,16 @@ try {
 finally {
     Pop-Location
 }
+
+    # PATCH FIX51: dist SACH - ban Full chi ship dung HCStudio.exe.
+    # Lite/debug sot tu lan build truoc duoc don de kho tai khong lan
+    # artifact cu (Lite van san sang: bo -Full la build lai trong 2 phut).
+    if ($Full) {
+        foreach ($stale in @("HCStudio-Lite.exe", "HCStudio-debug.exe")) {
+            $stalePath = Join-Path $DistDir $stale
+            if (Test-Path $stalePath) { Remove-Item $stalePath -Force; Write-Host "Don file cu: $stale" }
+        }
+    }
 
 # ---------------------------------------------------------------- summary
  $appExe = Join-Path $DistDir $exeName

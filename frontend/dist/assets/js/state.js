@@ -10,6 +10,7 @@
     voices: [],
     voiceId: "Adam",
     enginePref: "auto",
+    lightRam: false,
     // PATCH FIX46: nhân bản giọng (runtime only, không persist)
     refCloneOn: false,
     refAudioPath: "",
@@ -63,6 +64,7 @@
         state.pitch = clamp(settings.pitch ?? state.pitch, -12, 12);
         state.volume = clamp(settings.volume ?? state.volume, 0, 1);
         state.themeMode = settings.themeMode || "auto";
+        state.lightRam = !!settings.lightRam;
       }
       state.isDarkWin = appState.isDarkWin;
       state.voices = voices;
@@ -71,7 +73,7 @@
         state.voiceId = voices[0]?.id || "Adam";
       }
       emit(["appState", "voiceId", "enginePref", "speed", "pitch", "volume",
-            "themeMode", "isDarkWin", "voices"]);
+            "themeMode", "lightRam", "isDarkWin", "voices"]);
     },
     saveDebounced() {
       clearTimeout(actions._t);
@@ -80,6 +82,7 @@
           themeMode: state.themeMode,
           voiceId: state.voiceId,
           enginePref: state.enginePref,
+          lightRam: state.lightRam,
           speed: state.speed,
           pitch: state.pitch,
           volume: state.volume,

@@ -90,6 +90,18 @@ func (a *App) startup(ctx context.Context) {
 	engine.NeuralFactory = func(dir string) engine.Driver { return vienneu.New(dir) }
 	engine.NeuralLinked.Store(vienneu.Linked)
 
+	// PATCH FIX51: công tắc "Nhẹ RAM (int8)" — phải set TRƯỚC NewHybrid
+	// vì engine chỉ đọc weights ĐÚNG MỘT LẦN lúc init. int8 chưa đủ file
+	// thì flag vẫn bật nhưng ResolveModelPaths tự rơi về update/ (f32).
+	engine.PreferInt8Dir.Store(a.settings.LightRam)
+	if a.settings.LightRam {
+		if engine.Int8AssetsReady(modelDir) {
+			diagf("startup: LightRam=ON — nạp weights int8 (nhẹ RAM ~4 lần)")
+		} else {
+			diagf("startup: LightRam=ON nhưng chưa đủ 7 file int8 — dùng f32 (update/). Bấm \"Tải gói int8\" trong UI.")
+		}
+	}
+
 	a.hybrid = engine.NewHybrid(modelDir)
 	a.player = player.New()
 	a.sessions = map[string]*Session{}
@@ -218,6 +230,14 @@ func (a *App) SaveSettings(s appstate.Settings) {
 	switch s.EnginePref {
 	case "auto", "neural", "sapi":
 		a.settings.EnginePref = s.EnginePref
+	}
+	// PATCH FIX51: chế độ nhẹ RAM — chỉ áp dụng lần khởi động sau vì
+	// engine nạp weights một lần duy nhất lúc init (đổi nóng = rủi ro cgo).
+	if s.LightRam != a.settings.LightRam {
+		a.settings.LightRam = s.LightRam
+		diagf("settings: LightRam -> %v (áp dụng lần khởi động sau)", s.LightRam)
+		a.toast("info", "Nhẹ RAM (int8)",
+			"Đã lưu — đổi có hiệu lực ở LẦN KHỞI ĐỘNG SAU của app.")
 	}
 	if len(s.VoiceID) > 0 && len(s.VoiceID) < 128 {
 		a.settings.VoiceID = s.VoiceID
@@ -685,6 +705,77 @@ func (a *App) CancelModelDownload() {
 	}
 }
 
+// PATCH FIX51 — INT8 (nhẹ RAM): trạng thái bộ weights lượng tử hoá.
+type Int8Status struct {
+	Ready    bool     `json:"ready"`
+	LightRam bool     `json:"lightRam"`
+	TotalMB  int      `json:"totalMB"`
+	Missing  []string `json:"missing"`
+}
+
+// GetInt8Status trả JSON cho UI: int8 đã đủ trên máy chưa + còn thiếu gì.
+func (a *App) GetInt8Status() string {
+	modelDir := appstate.ModelsDir()
+	st := Int8Status{Ready: engine.Int8AssetsReady(modelDir), LightRam: a.settings.LightRam}
+	total := int64(0)
+	for _, s := range engine.AssetManifest {
+		if !strings.HasPrefix(filepath.ToSlash(s.DestRel), "int8/") {
+			continue
+		}
+		total += s.SizeHint
+		fi, err := os.Stat(filepath.Join(modelDir, s.DestRel))
+		if err != nil || fi.Size() != s.SizeHint {
+			st.Missing = append(st.Missing, s.DestRel)
+		}
+	}
+	st.TotalMB = int(total / 1024 / 1024)
+	b, err := json.Marshal(st)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// DownloadInt8Assets tải RIÊNG 7 file int8 (~158 MB) — không đụng luồng
+// chuẩn 14/14. Dùng chung guard modelDLRun để không bao giờ có 2 luồng
+// tải cùng lúc (tránh giành .part và giành thanh tiến độ của nhau).
+func (a *App) DownloadInt8Assets() {
+	a.mu.Lock()
+	if a.modelDLRun {
+		a.mu.Unlock()
+		return
+	}
+	a.modelDLRun = true
+	modelDir := appstate.ModelsDir()
+	if a.downloader == nil {
+		a.downloader = vienneu.NewDownloader(func(e vienneu.DownloadEvent) {
+			wailsruntime.EventsEmit(a.ctx, "hcstudio:modeldl", e)
+			if e.State == "done" {
+				a.hybrid.RefreshNeuralReadiness()
+				a.toast("success", "Đã tải bộ int8",
+					"Weights nhẹ (~158 MB) sẵn sàng. Bật nút \"Nhẹ RAM (int8)\" rồi khởi động lại app.")
+			}
+		})
+	}
+	dl := a.downloader
+	a.mu.Unlock()
+
+	diagf("modeldl(int8): người dùng bấm tải bộ int8 -> %s", modelDir)
+
+	go func() {
+		defer func() {
+			a.mu.Lock()
+			a.modelDLRun = false
+			a.mu.Unlock()
+		}()
+		if err := dl.RunInt8(context.Background(), modelDir); err != nil &&
+			err != context.Canceled {
+			diagf("[error] modeldl(int8): kết thúc với lỗi: %v", err)
+			a.toast("error", "Tải bộ int8 lỗi", truncate(err.Error(), 200))
+		}
+	}()
+}
+
 // ImportReport là kết quả nhập gói ZIP offline cho UI hiển thị.
 type ImportReport struct {
 	OK          bool     `json:"ok"`
@@ -748,7 +839,11 @@ func (a *App) ImportOfflinePackage() string {
 		base := filepath.Base(a2.DestRel)
 		f := byName[base]
 		if f == nil {
-			report.Missing = append(report.Missing, a2.DestRel)
+			// PATCH FIX51: bộ int8 là TÙY CHỌN — thiếu không được tính
+			// là "gói chưa đủ", nếu không gói 14/14 chuẩn sẽ bị từ chối oan.
+			if a2.Mandatory {
+				report.Missing = append(report.Missing, a2.DestRel)
+			}
 			continue
 		}
 		if a2.SizeHint > 0 && f.UncompressedSize64 != uint64(a2.SizeHint) {

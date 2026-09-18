@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"hcstudio/internal/engine"
@@ -46,8 +47,26 @@ func (d *Downloader) Cancel() {
 // Running trạng thái hiện tại.
 func (d *Downloader) Running() bool { return d.running.Load() }
 
-// Run bắt đầu tải toàn bộ manifest vào modelDir. Thread-safe: chặn re-entry.
+// Run bắt đầu tải các file BẮT BUỘC của manifest vào modelDir.
+// PATCH FIX51: các file int8 (Mandatory:false) KHÔNG nằm trong luồng
+// chuẩn — người dùng chủ động bấm "Tải gói int8" mới lấy (RunInt8).
+// Thread-safe: chặn re-entry.
 func (d *Downloader) Run(parent context.Context, modelDir string) error {
+	return d.runFiltered(parent, modelDir, func(a engine.AssetSpec) bool {
+		return a.Mandatory
+	}, "Đã tải đủ toàn bộ trọng số")
+}
+
+// RunInt8 tải RIÊNG bộ 7 file int8 (tùy chọn nhẹ RAM). Nếu máy đã đủ
+// (skip-theo-size) thì chạy xong gần như ngay lập tức.
+func (d *Downloader) RunInt8(parent context.Context, modelDir string) error {
+	return d.runFiltered(parent, modelDir, func(a engine.AssetSpec) bool {
+		return strings.HasPrefix(filepath.ToSlash(a.DestRel), "int8/")
+	}, "Đã tải đủ bộ int8 (nhẹ RAM ~4 lần)")
+}
+
+// runFiltered: phần thân chung — tải đúng các entry thoả pick().
+func (d *Downloader) runFiltered(parent context.Context, modelDir string, pick func(engine.AssetSpec) bool, doneMsg string) error {
 	if !d.running.CompareAndSwap(false, true) {
 		return fmt.Errorf("tiến trình tải model đang chạy")
 	}
@@ -57,8 +76,17 @@ func (d *Downloader) Run(parent context.Context, modelDir string) error {
 	d.cancel = cancel
 	defer cancel()
 
-	total := int64(0)
+	// Lọc TRƯỚC để TotalFiles/BytesTotal/FileIdx khớp đúng tập đang tải.
+	var entries []engine.AssetSpec
 	for _, a := range engine.AssetManifest {
+		if pick != nil && !pick(a) {
+			continue
+		}
+		entries = append(entries, a)
+	}
+
+	total := int64(0)
+	for _, a := range entries {
 		if a.SizeHint > 0 {
 			total += a.SizeHint
 		}
@@ -66,12 +94,12 @@ func (d *Downloader) Run(parent context.Context, modelDir string) error {
 	done := int64(0)
 
 	d.emit(ctx, DownloadEvent{
-		State: "running", Pct: 0, TotalFiles: len(engine.AssetManifest), BytesTotal: total,
+		State: "running", Pct: 0, TotalFiles: len(entries), BytesTotal: total,
 	})
 
 	client := &http.Client{Timeout: 0} // streaming; kiểm soát timeout ở per-request ctx
 
-	for i, a := range engine.AssetManifest {
+	for i, a := range entries {
 		if err := ctx.Err(); err != nil {
 			d.emit(ctx, DownloadEvent{State: "cancelled", Message: "Đã huỷ theo yêu cầu", FileIdx: i})
 			return ctx.Err()
@@ -126,7 +154,7 @@ func (d *Downloader) Run(parent context.Context, modelDir string) error {
 				}
 				d.emit(ctx, DownloadEvent{
 					State: "running", Pct: pct, CurrentFile: filepath.Base(a.DestRel),
-					FileIdx: i + 1, TotalFiles: len(engine.AssetManifest),
+					FileIdx: i + 1, TotalFiles: len(entries),
 					BytesDone: maxI64(done, 0), BytesTotal: maxI64(total, done, 1),
 				})
 			})
@@ -153,13 +181,12 @@ func (d *Downloader) Run(parent context.Context, modelDir string) error {
 		}
 	}
 
-	// PATCH FIX42: event "done" trước đây không mang TotalFiles/FileIdx
-	// => log app in "state=done · file 0/0" gây hiểu nhầm là không tải
-	// file nào. Điền đủ số liệu để UI/log hiển thị 12/12.
+	// PATCH FIX42: event "done" phải mang đủ số liệu — tính trên tập ĐÃ
+	// LỌC (14 file luồng chuẩn / 7 file int8), không phải toàn manifest.
 	d.emit(ctx, DownloadEvent{
 		State: "done", Pct: 100, BytesTotal: done, BytesDone: done,
-		FileIdx: len(engine.AssetManifest), TotalFiles: len(engine.AssetManifest),
-		Message: "Đã tải đủ toàn bộ trọng số",
+		FileIdx: len(entries), TotalFiles: len(entries),
+		Message: doneMsg,
 	})
 	return nil
 }

@@ -27,6 +27,7 @@ type Settings struct {
 	Pitch      float64   `json:"pitch"`      // -12 .. +12 semitone
 	Volume     float64   `json:"volume"`     // 0 .. 1
 	OutDir     string    `json:"outDir"`
+	LightRam   bool      `json:"lightRam"` // PATCH FIX51: nạp weights int8 (nhẹ RAM ~4 lần) khi khởi động
 	UpdatedAt  string    `json:"updatedAt"`
 }
 
@@ -36,6 +37,7 @@ func DefaultSettings() Settings {
 		ThemeMode:  ThemeAuto,
 		VoiceID:    "Adam", // giọng mặc định chính thức của VieNeu v3 Turbo
 		EnginePref: "auto",
+		LightRam:   false,
 		Speed:      1.0,
 		Pitch:      0.0,
 		Volume:     0.9,

@@ -19,6 +19,8 @@
     "wiz-import",
     // PATCH FIX46: nhân bản giọng
     "ref-clone-check", "ref-clone-body", "ref-clone-pick", "ref-clone-name",
+    // PATCH FIX51: chế độ nhẹ RAM (int8)
+    "lightram-check", "lightram-dl", "lightram-note",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 
   /* ---------- helpers ---------- */
@@ -367,6 +369,44 @@
   /* ---------- EXPOSE ---------- */
   // PATCH FIX46: wiring nhân bản giọng — checkbox bật/tắt panel, nút chọn
   // file WAV qua dialog native; state chỉ runtime, không persist settings.
+  /* ---------- PATCH FIX51: Nhẹ RAM (int8) ---------- */
+  let int8Ready = false;
+  async function refreshInt8Status() {
+    if (!els["lightram-check"]) return;
+    try {
+      const raw = await bridge.GetInt8Status();
+      const st = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
+      int8Ready = !!st.ready;
+      if (els["lightram-dl"]) els["lightram-dl"].hidden = int8Ready;
+      if (els["lightram-note"]) {
+        els["lightram-note"].textContent = int8Ready
+          ? "Đã có bản int8 trên máy — bật gạt để dùng ở lần khởi động sau."
+          : `Chưa có bản int8 trên máy (~${st.totalMB || 158} MB) — bấm tải MỘT LẦN, sau đó offline vĩnh viễn.`;
+      }
+    } catch (e) { /* mock/preview — bỏ qua */ }
+  }
+  function wireLightRam() {
+    if (!els["lightram-check"]) return;
+    bridge.GetSettings().then((s) => {
+      if (s && els["lightram-check"]) els["lightram-check"].checked = !!s.lightRam;
+    }).catch(() => {});
+    els["lightram-check"].addEventListener("change", () => {
+      const on = els["lightram-check"].checked;
+      actions.patch({ lightRam: on });
+      actions.saveDebounced();
+      refreshInt8Status();
+    });
+    if (els["lightram-dl"]) {
+      els["lightram-dl"].addEventListener("click", () => {
+        if (bridge.DownloadInt8Assets) bridge.DownloadInt8Assets();
+      });
+    }
+    bridge.bus.on("hcstudio:modeldl", (e) => {
+      if (e && e.state === "done") refreshInt8Status();
+    });
+    refreshInt8Status();
+  }
+
   function wireRefClone() {
     if (!els["ref-clone-check"]) return;
     els["ref-clone-check"].addEventListener("change", () => {
@@ -399,6 +439,7 @@
       wireEditor();
       wireWizard();
       wireRefClone();
+      wireLightRam();
 
       bridge.bus.on("hcstudio:job", (j) => {
         if (j.state === "splitting" || j.state === "synthesizing" || j.state === "dsp") {

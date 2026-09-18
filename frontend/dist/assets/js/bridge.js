@@ -67,6 +67,9 @@
       CancelModelDownload: () => api.CancelModelDownload(),
       DownloadNeuralAssets: () => api.DownloadNeuralAssets(),
       ImportOfflinePackage: () => api.ImportOfflinePackage ? api.ImportOfflinePackage() : Promise.resolve(""),
+      // PATCH FIX51: bộ int8 nhẹ RAM
+      GetInt8Status: () => api.GetInt8Status ? api.GetInt8Status() : Promise.resolve("{}"),
+      DownloadInt8Assets: () => api.DownloadInt8Assets ? api.DownloadInt8Assets() : Promise.resolve(),
       OpenFolder: (w) => api.OpenFolder(w),
       WindowAction: (cmd) => api.WindowAction(cmd),
       DetectWinTheme: () => api.DetectWinTheme(),
@@ -162,6 +165,8 @@
                  speed: 1, pitch: 0, volume: .9, outDir: "", updatedAt: "" };
       },
       async SaveSettings() {},
+      async GetInt8Status() { return JSON.stringify({ ready: false, lightRam: false, totalMB: 158, missing: 7 }); },
+      async DownloadInt8Assets() { setTimeout(() => Bus.emitLocal('hcstudio:modeldl', { state: 'done', pct: 100, fileIdx: 7, totalFiles: 7 }), 600); },
       async Synthesize(req) {
         const id = `job-${++jobSeq}`;
         setTimeout(() => Bus.emitLocal("hcstudio:job", { id, state: "splitting", pct: 1, message: "Đang tách câu…" }), 30);

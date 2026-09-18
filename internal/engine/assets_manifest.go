@@ -5,7 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
+
+// atomicBool là bí danh dễ đọc trong file này.
+type atomicBool = atomic.Bool
 
 // AssetSpec mô tả một tệp trọng số của profile vieneu-v3-onnx cần tải về.
 // URL bám đúng 1-1 script chính thức run-v3-tts-test.ps1 của VieNeu-TTS.cpp.
@@ -46,6 +50,12 @@ const (
 	// heads + backbone_shared khac oid (weights moi). Day chinh la bo weights
 	// Space demo HF chay (onnx_runtime_lite.py mac dinh onnx_update).
 	hfV3Update = hfV3Base + "/onnx_update"
+	// PATCH FIX51: subfolder onnx_int8/ @8b7e9cff - weights luong tu hoa
+	// (backbone 103.891.968 B ~ 1/4 f32; decode/prefill int8 graph to hon
+	// nhung nhe RAM khi chay). Xac minh 2026-09-18 qua HF tree API: du 7
+	// file, ten TRUNG KHOP update/ (config, tokenizer, prefill, decode,
+	// acoustic, heads, backbone). Tong 165.496.148 B ~ 158 MB.
+	hfInt8Base = hfV3Base + "/onnx_int8"
 	// PATCH FIX48: pin cả MOSS theo commit — trước đây trỏ "resolve/main"
 	// (không bất biến). Commit ceff0d07 là HEAD của repo ngày 2026-04-17,
 	// khớp đúng 4 file codec app đang dùng (SizeHint xác minh bằng HEAD).
@@ -196,6 +206,48 @@ var AssetManifest = []AssetSpec{
 		DestRel:  "speaker_encoder.onnx",
 		SizeHint: 28_303_423, Mandatory: true,
 	},
+
+	// ── PATCH FIX51: BỘ INT8 (TÙY CHỌN, NHẸ RAM ~4 LẦN) ──────
+	// Mandatory: false -> không bao giờ chặn wizard/ready/import.
+	// Lấy khi: nút "Tải gói int8" trong UI, gói ZIP offline kèm theo,
+	// hoặc Setup 1-file (Phương án B) chép sẵn. Bật qua nút gạt
+	// "Nhẹ RAM (int8)"; engine chỉ đọc int8/ khi ĐỦ 7 file đúng byte
+	// (Int8AssetsReady) — thiếu là tự rơi về update/ (f32), không nửa vời.
+	{
+		URL:      hfInt8Base + "/config.json",
+		DestRel:  filepath.Join("int8", "config.json"),
+		SizeHint: 2_152, Mandatory: false,
+	},
+	{
+		URL:      hfInt8Base + "/tokenizer.json",
+		DestRel:  filepath.Join("int8", "tokenizer.json"),
+		SizeHint: 22_320, Mandatory: false,
+	},
+	{
+		URL:      hfInt8Base + "/vieneu_prefill.onnx",
+		DestRel:  filepath.Join("int8", "vieneu_prefill.onnx"),
+		SizeHint: 1_090_823, Mandatory: false,
+	},
+	{
+		URL:      hfInt8Base + "/vieneu_decode_step.onnx",
+		DestRel:  filepath.Join("int8", "vieneu_decode_step.onnx"),
+		SizeHint: 1_062_040, Mandatory: false,
+	},
+	{
+		URL:      hfInt8Base + "/vieneu_v3_heads.npz",
+		DestRel:  filepath.Join("int8", "vieneu_v3_heads.npz"),
+		SizeHint: 52_219_622, Mandatory: false,
+	},
+	{
+		URL:      hfInt8Base + "/vieneu_acoustic_cached.onnx",
+		DestRel:  filepath.Join("int8", "vieneu_acoustic_cached.onnx"),
+		SizeHint: 7_207_223, Mandatory: false,
+	},
+	{
+		URL:      hfInt8Base + "/vieneu_backbone_shared.data",
+		DestRel:  filepath.Join("int8", "vieneu_backbone_shared.data"),
+		SizeHint: 103_891_968, Mandatory: false,
+	},
 }
 
 // ModelPaths là bộ đường dẫn tuyệt đối dùng cho vieneu_init_params_v2.
@@ -214,7 +266,14 @@ func ResolveModelPaths(modelDir string) ModelPaths {
 	// tokenizer + 4 file graph/weights deu nam trong do). Codec va voices
 	// giu nguyen vi khong doi. Thu muc onnx/ cu con lai tren disk lam
 	// rollback offline (FIX48 tro ve) nhung engine khong con doc.
+	// PATCH FIX51: nếu người dùng bật "Nhẹ RAM (int8)" (PreferInt8Dir)
+	// và máy ĐỦ 7 file int8/ đúng byte thì nạp bản int8 — cùng tên file,
+	// cùng kiến trúc (L=1), engine C++ KHÔNG đổi. Thiếu bất kỳ file nào
+	// là tự rơi về update/ (f32) — không bao giờ nửa vời.
 	upd := filepath.Join(modelDir, "update")
+	if PreferInt8Dir.Load() && Int8AssetsReady(modelDir) {
+		upd = filepath.Join(modelDir, "int8")
+	}
 	return ModelPaths{
 		ModelDir: modelDir,
 		OnnxDir:  upd,
@@ -223,6 +282,32 @@ func ResolveModelPaths(modelDir string) ModelPaths {
 		Config:   filepath.Join(upd, "config.json"),
 		Tokenize: filepath.Join(upd, "tokenizer.json"),
 	}
+}
+
+// PATCH FIX51 — PreferInt8Dir: công tắc "Nhẹ RAM (int8)". app.go set
+// lúc startup ĐỨNG TRƯỚC NewHybrid (engine chỉ đọc một lần khi init).
+var PreferInt8Dir atomicBool
+
+// Int8Files là số file int8 bắt buộc phải đủ để bật chế độ nhẹ RAM.
+const Int8Files = 7
+
+// Int8AssetsReady kiểm tra ĐỦ 7 file int8 với ĐÚNG kích thước byte.
+// Khác MissingAssets (chỉ cần tồn tại >0), ở đây nghiêm hơn: sai size
+// là coi như không có — weights âm thầm sai byte còn nguy hơn thiếu.
+func Int8AssetsReady(modelDir string) bool {
+	n := 0
+	for _, a := range AssetManifest {
+		if !strings.HasPrefix(filepath.ToSlash(a.DestRel), "int8/") {
+			continue
+		}
+		full := filepath.Join(modelDir, a.DestRel)
+		st, err := os.Stat(full)
+		if err != nil || st.Size() != a.SizeHint {
+			return false
+		}
+		n++
+	}
+	return n == Int8Files
 }
 
 // MissingAssets liệt kê những tệp bắt buộc còn thiếu trong modelDir.
