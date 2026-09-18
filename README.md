@@ -1,9 +1,9 @@
-# 🎙️ HCStudio v5.0
+# 🎙️ TAStudio v1.0
 
 > Trình đọc văn bản tiếng Việt **offline hoàn toàn** cho Windows.
 > 20 giọng neural tự nhiên · Hybrid Engine · Một tệp `.exe` duy nhất · Không port, không CMD.
 
-HCStudio v5.0 được xây trên nền tảng ba mã nguồn mở của cộng đồng VieNeu-TTS:
+TAStudio v5.0 được xây trên nền tảng ba mã nguồn mở của cộng đồng VieNeu-TTS:
 
 | Nguồn | Vai trò trong HCStudio |
 |---|---|
@@ -33,7 +33,7 @@ HCStudio v5.0 được xây trên nền tảng ba mã nguồn mở của cộng 
 
 1. Windows 10/11 x64 với WebView2 Runtime (mặc định có sẵn).
 2. Build theo [docs/BUILDING.md](docs/BUILDING.md) hoặc nhận bản build thành phẩm.
-3. Chạy `HCStudio.exe`:
+3. Chạy `TAStudio.exe`:
    - lần đầu app mời **Tải mô hình neural** — bấm một nút rồi làm việc khác;
    - hoặc chọn "Dùng Ultra-Lite trước" để nghe bằng giọng hệ thống ngay lập tức;
    - dán văn bản → chọn giọng → `Phát` (`Ctrl+Enter`) → `Xuất WAV/MP3`.
@@ -67,7 +67,7 @@ backend Go ── Job orchestrator ── Smart splitter
 
 ## ⚖️ Giấy phép & tôn trọng tác giả
 
-Toàn bộ mã nguồn HCStudio phục vụ cộng đồng cùng tinh thần với các dự án gốc.
+Toàn bộ mã nguồn TAStudio phục vụ cộng đồng cùng tinh thần với các dự án gốc.
 Vui lòng giữ nguyên thông tin attribution khi phân phối lại — chi tiết tại
 [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
 
