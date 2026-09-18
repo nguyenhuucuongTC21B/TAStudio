@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HCStudio v5.0</title>
+  <script>
+  /* hcstudio-diag — PATCH run #29: khối chẩn đoán TỐI GIẢN, cú pháp ES5 thuần
+     (không dùng ?. ?? template literal — phải sống sót kể cả khi WebView2 cũ
+     làm chết cú pháp các file JS hiện đại của app). Nhiệm vụ:
+       (1) Bắt MỌI lỗi JS (window.onerror / unhandledrejection) → hiện BANNER
+           ĐỎ ngay trên màn hình (chụp màn hình gửi lại được) + ghi hcstudio.log
+           qua window.go.backend.App.WriteLog (bindings Wails inject độc lập,
+           còn sống kể cả khi script của app đã chết).
+       (2) Ghi vết boot: phiên bản WebView2 (user-agent), window.HC có tồn tại,
+           bridge đang chế độ wails hay mock.
+       (3) Bọc log quanh các lời gọi bridge chính để biết chính xác hàm nào
+           thất bại khi hydrate. */
+  (function () {
+    "use strict";
+    var DIAG_TAG = "hcstudio-diag";
+
+    function goBackend() {
+      /* PATCH run #31: thử CẢ HAI đường dẫn bind (go.backend.App / go.main.App)
+         — Wails đặt binding theo tên package Go, hard-code một đường khiến
+         khối diag không ghi được log khi binding nằm ở đường kia. */
+      try {
+        var cands = [];
+        if (window.go && window.go.backend && window.go.backend.App) cands.push(window.go.backend.App);
+        if (window.go && window.go.main && window.go.main.App) cands.push(window.go.main.App);
+        for (var i = 0; i < cands.length; i++) {
+          if (typeof cands[i].WriteLog === "function") { return cands[i]; }
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    function fileLog(level, msg) {
+      try {
+        var b = goBackend();
+        if (b) { b.WriteLog(level, "[ui] " + msg); }
+      } catch (e) {}
+      try { console.log("[HCStudio " + level + "] " + msg); } catch (e) {}
+    }
+
+    /* ---- banner đỏ cố định trên màn hình ---- */
+    function showBanner(text) {
+      try {
+        var old = document.getElementById(DIAG_TAG);
+        if (old && old.parentNode) { old.parentNode.removeChild(old); }
+        var d = document.createElement("div");
+        d.id = DIAG_TAG;
+        d.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;" +
+          "background:#b3261e;color:#ffffff;font:13px/1.5 Consolas,monospace;" +
+          "padding:10px 44px 10px 14px;max-height:45vh;overflow:auto;" +
+          "white-space:pre-wrap;";
+        d.textContent = text;
+        var x = document.createElement("button");
+        x.textContent = "X";
+        x.style.cssText = "position:absolute;top:6px;right:8px;background:#fff;" +
+          "color:#b3261e;border:0;border-radius:4px;width:26px;height:26px;" +
+          "cursor:pointer;font-weight:bold;";
+        x.onclick = function () { if (d.parentNode) d.parentNode.removeChild(d); };
+        d.appendChild(x);
+        (document.body || document.documentElement).appendChild(d);
+      } catch (e) {}
+    }
+
+    /* ---- (1) bắt lỗi toàn cục ---- */
+    window.onerror = function (msg, src, line, col) {
+      var t = "LỖI SCRIPT GIAO DIỆN:\n" + msg +
+        "\nTại: " + src + " · dòng " + line + " · cột " + col;
+      showBanner(t);
+      fileLog("error", "window.onerror: " + msg + " @ " + src + ":" + line + ":" + col);
+      return false;
+    };
+    window.addEventListener("unhandledrejection", function (ev) {
+      var r = ev && ev.reason ? ev.reason : ev;
+      var m = "" + r;
+      showBanner("LỖI PROMISE KHÔNG ĐƯỢC XỬ LÝ:\n" + m);
+      fileLog("error", "unhandledrejection: " + m);
+    });
+
+    fileLog("info", "diag khối chạy · UA=" + navigator.userAgent);
+
+    /* ---- (2) kiểm tra môi trường sau khi mọi script đã chạy ---- */
+    document.addEventListener("DOMContentLoaded", function () {
+      try {
+        var hasHC = !!window.HC;
+        var isWails = hasHC && !!window.HC.isWails;
+        var mode = (hasHC && window.HC.bridge) ? window.HC.bridge.mode : "(không có bridge)";
+        fileLog("info", "DOMContentLoaded: window.HC=" + hasHC +
+          " · isWails=" + isWails + " · bridge.mode=" + mode);
+        if (!hasHC) {
+          showBanner("NGHIÊM TRỌNG: các file JS giao diện không chạy được " +
+            "(window.HC không tồn tại — bridge.js/state.js/ui.js chết trước).\n" +
+            "Nút Phát sẽ kẹt mờ, wizard tải mô hình không bao giờ hiện.\n" +
+            "Xem chi tiết trong hcstudio.log.");
+        } else if (!isWails) {
+          showBanner("CẢNH BÁO: app đang chạy ở CHẾ ĐỘ MOCK — không thấy bindings " +
+            "Wails (window.go). Mọi nút bấm chỉ giả lập, KHÔNG có tiếng thật.\n" +
+            "bridge.mode=" + mode);
+        }
+        wireBridgeLogs();
+      } catch (e) {
+        fileLog("error", "diag DOMContentLoaded lỗi: " + (e && e.message ? e.message : e));
+      }
+    });
+
+    /* ---- (3) bọc log quanh bridge ---- */
+    function wireBridgeLogs() {
+      try {
+        if (!window.HC || !window.HC.bridge) return;
+        var b = window.HC.bridge;
+        var wrap = function (name) {
+          var orig = b[name];
+          if (typeof orig !== "function" || orig.__hcLogged) return;
+          var logged = function () {
+            var p = orig.apply(this, arguments);
+            if (p && typeof p.then === "function") {
+              p.then(function (r) {
+                var extra = "";
+                try {
+                  if (name === "GetAppState" && r) {
+                    extra = " neuralLinked=" + r.neuralLinked +
+                            " neuralReady=" + r.neuralReady +
+                            " missingFiles=" + (r.missingFiles ? r.missingFiles.length : "?");
+                  } else if (name === "ListVoices" && r && r.length) {
+                    extra = " " + r.length + " giọng";
+                  }
+                } catch (e) {}
+                fileLog("info", name + " OK" + extra);
+              }, function (e) {
+                fileLog("error", name + " THẤT BẠI: " + e);
+              });
+            }
+            return p;
+          };
+          logged.__hcLogged = true;
+          b[name] = logged;
+        };
+        var names = ["GetAppState", "ListVoices", "GetSettings", "Synthesize",
+                     "PlayJob", "DownloadNeuralAssets", "ExportAudio", "PickRefAudio",
+                     "ImportOfflinePackage"];
+        for (var i = 0; i < names.length; i++) wrap(names[i]);
+        fileLog("info", "Đã bọc log quanh " + names.length + " hàm bridge");
+      } catch (e) {
+        fileLog("error", "wireBridgeLogs lỗi: " + (e && e.message ? e.message : e));
+      }
+    }
+  })();
+  </script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230A84FF'/%3E%3Cpath d='M16 32h4l4-10 6 22 5-16 4 4h9' stroke='white' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body>
+  <div id="app-shell">
+
+    <!-- ══════════════ TITLEBAR (frameless, tự vẽ traffic-lights) ══════════════ -->
+    <header class="titlebar draggable">
+      <div class="traffic-lights nodrag">
+        <button id="btn-win-close" class="tl tl-close" title="Đóng" aria-label="Đóng"></button>
+        <button id="btn-win-min"   class="tl tl-min"   title="Thu nhỏ" aria-label="Thu nhỏ"></button>
+        <button id="btn-win-max"   class="tl tl-max"   title="Phóng to" aria-label="Phóng to"></button>
+      </div>
+
+      <div class="titlebar-center">
+        <svg class="logo" viewBox="0 0 64 64" width="20" height="20"><rect width="64" height="64" rx="16" fill="var(--accent)"/><path d="M16 32h4l4-10 6 22 5-16 4 4h9" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="app-name">HCStudio <b>v5.0</b></span>
+        <span id="engine-pill" class="engine-pill" title="Trạng thái engine neural">…</span>
+      </div>
+
+      <div class="titlebar-actions nodrag">
+        <button id="btn-models" class="tb-icon-btn" title="Thư mục mô hình"></button>
+        <button id="btn-theme"  class="tb-icon-btn" title="Chuyển chế độ sáng/tối"></button>
+      </div>
+    </header>
+
+    <!-- ══════════════ MAIN: 2 vùng (trái nhập liệu / phải điều khiển) ══════════════ -->
+    <main class="workspace">
+
+      <!-- LEFT · Khung nhập liệu -->
+      <section class="card editor-card">
+        <div class="card-head">
+          <h2><span class="dot-accent"></span> Văn bản</h2>
+          <div class="editor-tools">
+            <button id="btn-paste" class="tool-btn" title="Dán từ clipboard"></button>
+            <button id="btn-clear" class="tool-btn" title="Xoá toàn bộ"></button>
+          </div>
+        </div>
+
+        <textarea id="text-input" spellcheck="false"
+          placeholder="Dán hoặc nhập văn bản tiếng Việt ở đây…
+
+• Hỗ trợ văn bản dài không giới hạn thực tế (tự tách câu để đọc mượt).
+• Cú pháp cảm xúc của VieNeu v3 hoạt động trực tiếp: ví dụ “Nghe hay quá [cười]!”
+• Ctrl+Enter để phát nhanh không cần rời tay khỏi bàn phím."></textarea>
+
+        <div class="card-foot">
+          <div class="counter-wrap">
+            <span id="char-count" class="counter-chip">0 ký tự</span>
+            <span id="eta-chip" class="counter-chip subtle" hidden></span>
+          </div>
+          <span class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> Phát</span>
+        </div>
+      </section>
+
+      <!-- RIGHT · Bảng điều khiển giọng -->
+      <aside class="side-deck">
+
+        <!-- Voice picker -->
+        <section class="card voice-card">
+          <div class="card-head">
+            <h2><span class="dot-accent"></span> Giọng đọc</h2>
+            <span id="voice-count-chip" class="counter-chip subtle">25 giọng</span>
+          </div>
+
+          <div class="dropdown" id="voice-dropdown">
+            <button type="button" class="dropdown-toggle" id="voice-toggle">
+              <span id="voice-avatar" class="v-avatar male" data-initial="A"></span>
+              <span class="v-meta">
+                <strong id="voice-current-name">Adam</strong>
+                <small id="voice-current-desc">Nam · Nam · Giọng đọc tự nhiên</small>
+              </span>
+              <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+
+            <div class="dropdown-panel" id="voice-panel" role="listbox" tabindex="-1">
+              <input id="voice-search" type="text" placeholder="Tìm giọng đọc…" autocomplete="off" />
+              <div class="voice-list" id="voice-list"><!-- render động --></div>
+            </div>
+          </div>
+
+          <!-- PATCH FIX46: nhân bản giọng (zero-shot clone, thử nghiệm) -->
+          <div class="ref-clone-row" id="ref-clone-row" style="margin-top:12px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px">
+              <input type="checkbox" id="ref-clone-check" style="accent-color:#0A84FF" />
+              <span><strong>Nhân bản giọng</strong> <small style="opacity:.6">(thử nghiệm)</small></span>
+            </label>
+            <div id="ref-clone-body" style="display:none;margin-top:8px">
+              <button type="button" class="seg-btn" id="ref-clone-pick" style="width:100%">Chọn file WAV mẫu (3–8s)…</button>
+              <small id="ref-clone-name" style="display:block;margin-top:6px;opacity:.65;font-size:11.5px;word-break:break-all">Chưa chọn file</small>
+              <small style="display:block;margin-top:4px;opacity:.5;font-size:11px">Audio mẫu nên dài <strong>3–5 giây</strong> (một câu nói rõ, ít ồn). Dài hơn 8s app sẽ tự cắt. WAV PCM, mono/stereo.</small>
+            </div>
+          </div>
+
+          <label class="field-label" style="margin-top:14px">Lõi xử lý (Engine)</label>
+          <div class="segmented" id="engine-segmented">
+            <button data-engine="auto"   class="seg-btn active">Tự động</button>
+            <button data-engine="neural" class="seg-btn">Neural</button>
+            <button data-engine="sapi"   class="seg-btn">Ultra-Lite</button>
+          </div>
+        </section>
+
+        <!-- Sliders -->
+        <section class="card sliders-card">
+          <div class="card-head"><h2><span class="dot-accent"></span> Thông số</h2></div>
+
+          <div class="slider-row">
+            <div class="slider-headline">
+              <label>Tốc độ đọc</label><output id="out-speed">1.00×</output>
+            </div>
+            <input type="range" id="sl-speed" min="0.5" max="2" step="0.05" value="1" />
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-headline">
+              <label>Cao độ</label><output id="out-pitch">0 semitone</output>
+            </div>
+            <input type="range" id="sl-pitch" min="-12" max="12" step="0.5" value="0" />
+            <div class="slider-marks"><span>Trầm −12</span><span>0</span><span>+12 Cao</span></div>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-headline">
+              <label>Âm lượng</label><output id="out-volume">90%</output>
+            </div>
+            <input type="range" id="sl-volume" min="0" max="100" step="1" value="90" />
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <!-- ══════════════ PROGRESS + TRANSPORT ══════════════ -->
+    <footer class="dock">
+      <div class="progress-line" id="progress-line">
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill" style="--w:0%"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="stage-label">Sẵn sàng</span>
+          <span id="pct-label" class="pct">0%</span>
+        </div>
+      </div>
+
+      <div class="transport">
+        <div class="transport-left">
+          <button id="btn-export-wav" class="export-btn" title="Xuất file WAV chất lượng gốc">
+            <i data-ico="wav"></i><span>WAV</span>
+          </button>
+          <button id="btn-export-mp3" class="export-btn" title="Xuất file MP3 gọn nhẹ">
+            <i data-ico="mp3"></i><span>MP3</span>
+          </button>
+        </div>
+
+        <div class="transport-center">
+          <button id="btn-stop" class="ctl-btn stop" title="Dừng lại" disabled>
+            <i data-ico="stop"></i>
+          </button>
+          <button id="btn-play" class="ctl-btn play-main" title="Phát / Tạm dừng" disabled>
+            <i data-ico="play" class="ico-play"></i><i data-ico="pause" class="ico-pause" hidden></i>
+          </button>
+        </div>
+
+        <div class="transport-right">
+          <span id="clock-label" class="clock">0:00 / 0:00</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- ══════════════ SETUP WIZARD (khi thiếu model) ══════════════ -->
+    <div class="overlay" id="setup-overlay" hidden>
+      <div class="wizard card">
+        <h1 id="wiz-title">Chào mừng đến HCStudio v5.0 🎙️</h1>
+        <p class="wiz-sub" id="wiz-sub">
+          Bộ 20 giọng neural tiếng Việt <b>VieNeu v3 Turbo</b> (chất lượng 48 kHz,
+          tự nhiên như người thật) cần tải trọng số một lần duy nhất
+          (<span id="wiz-size">≈ 520 MB · 12 file</span>) rồi sống hoàn toàn offline trong máy bạn.
+          <!-- PATCH run #31: "≈ 1 GB" là ước lượng cũ theo toàn bộ repo HF; manifest thật của app là 546.433.245 byte ≈ 521 MB. -->
+        </p>
+
+        <ul class="wiz-features">
+          <li>Tầng Ultra-Lite (giọng Windows SAPI5) dùng được ngay mà không cần tải gì.</li>
+          <li>Bản tải bị đứt giữa chừng sẽ tự nối tiếp — thoát app cũng được.</li>
+          <li>Không mạng sau khi cài xong; mọi dữ liệu nằm tại máy người dùng.</li>
+        </ul>
+
+        <div class="dl-progress" id="dl-progress" hidden>
+          <div class="dl-file-row"><span id="dl-file">—</span><span id="dl-files-idx"></span></div>
+          <div class="progress-track thin">
+            <div class="progress-fill dl" id="dl-fill" style="--w:0%"></div>
+          </div>
+          <div class="dl-bytes-row"><span id="dl-bytes">0 B / 0 B</span><span id="dl-pct">0%</span></div>
+        </div>
+
+        <div class="wiz-actions">
+          <button id="wiz-skip"  class="btn ghost">Dùng Ultra-Lite trước</button>
+          <button id="wiz-import" class="btn ghost" title="Nhập gói ZIP trọng số tải từ nguồn của riêng bạn (không cần mạng)">Nhập gói ZIP (offline)</button>
+          <button id="wiz-dl"    class="btn primary">Tải mô hình neural</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toasts -->
+    <div class="toasts" id="toasts"></div>
+  </div>
+
+  <script src="assets/js/bridge.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/main.js"></script>
+</body>
+</html>

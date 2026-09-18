@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "HCStudio",
+  "outputfilename": "HCStudio",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "frontend": {
+    "dir": "frontend/dist"
+  },
+  "author": {
+    "name": "HCStudio Team"
+  },
+  "info": {
+    "productName": "HCStudio",
+    "productVersion": "5.0.0",
+    "copyright": "Copyright © 2026 HCStudio",
+    "comments": "Trình đọc văn bản tiếng Việt offline - Hybrid VieNeu v3 Turbo + SAPI5"
+  }
+}
