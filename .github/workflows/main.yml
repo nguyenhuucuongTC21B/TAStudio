@@ -1,4 +1,4 @@
-name: Build HCStudio
+name: Build TAStudio
 
 on:
   workflow_dispatch:   # chay thu cong bang nut Run workflow
@@ -41,6 +41,6 @@ jobs:
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: HCStudio-exe
+          name: TAStudio-exe
           path: dist/*
           if-no-files-found: error
