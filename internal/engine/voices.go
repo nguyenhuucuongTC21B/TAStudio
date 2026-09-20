@@ -1,5 +1,13 @@
 package engine
 
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
 // Catalog giọng preset của VieNeu-TTS v3 Turbo.
 //
 // PATCH FIX46: nâng cấp 20 → 25 giọng, pin đúng voices_v3_turbo.json revision
@@ -117,4 +125,60 @@ func IsNeuralAlias(id string) (string, bool) {
 		return "Minh Quân Pro", true
 	}
 	return "", false
+}
+
+// PATCH FIX52 — AuditVoiceCatalog: đối chiếu file voices_v3_turbo.json
+// thật trên máy với catalog Go 25 giọng. Trả số preset khớp; lỗi nếu file
+// hỏng HOẶC có ID lệch (thiếu trong JSON / thừa ngoài JSON) — caller ghi
+// log cảnh báo ngay lúc khởi động thay vì im lặng rơi về default voice.
+func AuditVoiceCatalog(modelDir string) (int, error) {
+	raw, err := os.ReadFile(filepath.Join(modelDir, "voices_v3_turbo.json"))
+	if err != nil {
+		return 0, err
+	}
+	var doc struct {
+		Presets map[string]json.RawMessage `json:"presets"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return 0, err
+	}
+	if len(doc.Presets) == 0 {
+		return 0, errors.New("voices JSON không có presets nào")
+	}
+	var missing, extra []string
+	for _, v := range neuralCatalog {
+		if _, ok := doc.Presets[v.ID]; !ok {
+			missing = append(missing, v.ID)
+		}
+	}
+	for k := range doc.Presets {
+		if !IsNeuralVoice(k) {
+			extra = append(extra, k)
+		}
+	}
+	if len(missing) > 0 || len(extra) > 0 {
+		return len(doc.Presets) - len(extra), errors.New(
+			"lệch catalog — catalog Go thiếu trong JSON: " + idList(missing) +
+				" · JSON thừa ngoài catalog: " + idList(extra))
+	}
+	return len(doc.Presets), nil
+}
+
+// idList ghép tối đa 6 ID thành chuỗi log gọn gàng.
+func idList(items []string) string {
+	if len(items) == 0 {
+		return "(không)"
+	}
+	out := ""
+	for i, it := range items {
+		if i > 0 {
+			out += ", "
+		}
+		out += it
+		if i == 5 && i < len(items)-1 {
+			out += fmt.Sprintf(" …(+%d)", len(items)-i-1)
+			break
+		}
+	}
+	return out
 }

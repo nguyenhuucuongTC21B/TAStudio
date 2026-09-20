@@ -38,7 +38,12 @@ func NewEventThrottle(ctx context.Context) *EventThrottle {
 // Send đẩy event qua throttle; trả ngay lập tức.
 func (t *EventThrottle) Send(name string, payload any) {
 	t.mu.Lock()
-	t.latest[name] = pendingEvent{payload: payload}
+	// PATCH FIX52 — BUG NGHIÊM TRỌNG: trước đây thiếu pending:true nên
+	// vòng loop bên dưới (`if !pe.pending { continue }`) bỏ qua TOÀN BỘ
+	// event => thanh tiến trình %, đồng hồ phát, toast... chết lặng;
+	// người dùng thấy app "đứng im" trong lúc tổng hợp. Đây là thủ
+	// phạm chính của phản hồi "timeline % không chạy".
+	t.latest[name] = pendingEvent{payload: payload, pending: true}
 	t.mu.Unlock()
 }
 

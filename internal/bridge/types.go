@@ -26,6 +26,7 @@ type SynthRequest struct {
 	Pitch          float64 `json:"pitch"`
 	Volume         float64 `json:"volume"`
 	AutoPlay       bool    `json:"autoPlay"`
+	Stream         bool    `json:"stream,omitempty"` // PATCH FIX52: phát theo luồng khi tổng hợp
 
 	// PATCH FIX46 — Nhân bản giọng: đường dẫn file WAV mẫu (thử nghiệm).
 	// Khi khác rỗng, job buộc dùng engine neural và BỎ VoiceID — engine
@@ -45,6 +46,8 @@ type JobSnapshot struct {
 	Message     string  `json:"message,omitempty"`
 	DurationSec float64 `json:"durationSec,omitempty"`
 	EtaSec      float64 `json:"etaSec,omitempty"`
+	ElapsedSec  float64 `json:"elapsedSec,omitempty"` // PATCH FIX52: đã chờ bao lâu
+	Streaming   bool    `json:"streaming,omitempty"`  // PATCH FIX52: đang phát theo luồng
 }
 
 // PlayEvent vị trí phát thanh phát qua event `hcstudio:play`.
@@ -65,3 +68,14 @@ type ToastPayload struct {
 
 // Voice alias trực tiếp engine.Voice — hợp đồng một nguồn duy nhất.
 type Voice = engine.Voice
+
+// PATCH FIX52 — SessionInfo: metadata một phiên đã tổng hợp cho khối
+// "Danh sách phát". KHÔNG kèm PCM (nhẹ, an toàn trả qua JSON số lớn).
+type SessionInfo struct {
+	ID          string  `json:"id"`
+	VoiceID     string  `json:"voiceId"`
+	Engine      string  `json:"engine"`
+	TextPreview string  `json:"textPreview"`
+	Duration    float64 `json:"duration"`
+	Created     string  `json:"created"`
+}

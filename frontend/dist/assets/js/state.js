@@ -32,6 +32,16 @@
     progressPct: 0,
     stageLabel: "Sẵn sàng",
     etaSec: null,
+    elapsedSec: 0,     // PATCH FIX52: thời gian đã chờ của job hiện tại
+    streaming: false,  // PATCH FIX52: đang phát theo luồng tổng hợp
+    queue: [],         // PATCH FIX52: hàng đợi [{text,status,jobId}]
+    queueRunning: false,
+    sessions: [],      // PATCH FIX52: danh sách phát (metadata)
+    elapsedSec: 0,     // PATCH FIX52: thời gian đã chờ của job hiện tại
+    streaming: false,  // PATCH FIX52: đang phát theo luồng tổng hợp
+    queue: [],         // PATCH FIX52: hàng đợi [{text,status,jobId}]
+    queueRunning: false,
+    sessions: [],      // PATCH FIX52: danh sách phát (metadata)
     durationSec: null,
     cursorMs: 0,
     totalMs: 0,
@@ -65,6 +75,8 @@
         state.volume = clamp(settings.volume ?? state.volume, 0, 1);
         state.themeMode = settings.themeMode || "auto";
         state.lightRam = !!settings.lightRam;
+        // PATCH FIX52: mặc định bật "Nghe ngay" nếu settings chưa có.
+        state.streamLive = settings.streamLive !== false;
       }
       state.isDarkWin = appState.isDarkWin;
       state.voices = voices;
@@ -73,7 +85,7 @@
         state.voiceId = voices[0]?.id || "Adam";
       }
       emit(["appState", "voiceId", "enginePref", "speed", "pitch", "volume",
-            "themeMode", "lightRam", "isDarkWin", "voices"]);
+            "themeMode", "lightRam", "streamLive", "isDarkWin", "voices"]);
     },
     saveDebounced() {
       clearTimeout(actions._t);
@@ -83,6 +95,7 @@
           voiceId: state.voiceId,
           enginePref: state.enginePref,
           lightRam: state.lightRam,
+          streamLive: state.streamLive !== false,
           speed: state.speed,
           pitch: state.pitch,
           volume: state.volume,

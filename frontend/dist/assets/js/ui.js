@@ -21,6 +21,9 @@
     "ref-clone-check", "ref-clone-body", "ref-clone-pick", "ref-clone-name",
     // PATCH FIX51: chế độ nhẹ RAM (int8)
     "lightram-check", "lightram-dl", "lightram-note",
+    // PATCH FIX52: chuyển đổi + streaming + hàng đợi + danh sách phát
+    "btn-convert", "wait-label", "btn-open-export", "stream-live-check",
+    "queue-list", "playlist-list", "btn-queue-add", "btn-queue-clear", "queue-count-chip",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 
   /* ---------- helpers ---------- */
@@ -214,7 +217,7 @@
     els["text-input"].addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        window.HC.ui.playRequested();
+        window.HC.ui.convertRequested();
       }
     });
   }
@@ -222,21 +225,40 @@
   /* ---------- TRANSPORT ---------- */
   function renderTransport() {
     const busy = state.jobBusy || state.playing;
-    els["btn-play"].disabled = false;
+    // PATCH FIX52: PHÁT = nghe lại KẾT QUẢ; CHUYỂN ĐỔI = tạo giọng nói.
+    els["btn-play"].disabled = !state.lastFinishedJob && !state.playing;
     els["btn-play"].querySelector(".ico-play").hidden = state.playing && !state.paused;
     els["btn-play"].querySelector(".ico-pause").hidden = !(state.playing && !state.paused);
     els["btn-stop"].disabled = !busy;
     els["btn-export-wav"].disabled = !state.lastFinishedJob;
     els["btn-export-mp3"].disabled = !state.lastFinishedJob;
+    if (els["btn-convert"]) els["btn-convert"].disabled = state.jobBusy;
 
-    setProgress(state.playing
+    // PATCH FIX52: khi streaming, thanh % vẫn thể hiện TIẾN ĐỘ TỔNG HỢP
+    // (người dùng nhìn thấy phần mềm đang chạy, không tưởng đứng máy).
+    setProgress(state.playing && !state.streaming
       ? (state.totalMs ? state.cursorMs / state.totalMs * 100 : 0)
       : state.progressPct);
     els["stage-label"].textContent = state.stageLabel;
 
-    if (state.playing && state.totalMs > 0) {
-      els["clock-label"].textContent =
-        `${fmtTime(state.cursorMs)} / ${fmtTime(state.totalMs)}`;
+    // PATCH FIX52: đồng hồ chờ — đã chờ bao lâu + dự kiến còn bao lâu.
+    if (els["wait-label"]) {
+      els["wait-label"].textContent = state.jobBusy
+        ? `Đã chờ ${fmtTime((state.elapsedSec || 0) * 1000)}` +
+          (state.etaSec > 0.5 ? ` · còn ~${fmtTime(state.etaSec * 1000)}` : "")
+        : "";
+    }
+
+    if (state.playing) {
+      if (state.streaming) {
+        els["clock-label"].textContent =
+          `${fmtTime(state.cursorMs)} · đang tổng hợp…`;
+      } else if (state.totalMs > 0) {
+        els["clock-label"].textContent =
+          `${fmtTime(state.cursorMs)} / ${fmtTime(state.totalMs)}`;
+      } else {
+        els["clock-label"].textContent = `${fmtTime(state.cursorMs)} / 0:00`;
+      }
     } else if (state.durationSec > 0) {
       els["clock-label"].textContent = `0:00 / ${fmtTime(state.durationSec * 1000)}`;
     } else {
@@ -429,6 +451,159 @@
     });
   }
 
+  /* ---------- PATCH FIX52: chuyển đổi / streaming / hàng đợi / playlist ---------- */
+  function wireFix52() {
+    if (els["btn-convert"]) {
+      els["btn-convert"].addEventListener("click", () => window.HC.ui.convertRequested());
+    }
+    if (els["btn-open-export"]) {
+      els["btn-open-export"].addEventListener("click", () => bridge.OpenFolder("exports"));
+    }
+    if (els["stream-live-check"]) {
+      bridge.GetSettings().then((s) => {
+        if (s && els["stream-live-check"]) {
+          els["stream-live-check"].checked = s.streamLive !== false;
+        }
+      }).catch(() => {});
+      els["stream-live-check"].addEventListener("change", () => {
+        actions.patch({ streamLive: els["stream-live-check"].checked });
+        actions.saveDebounced();
+      });
+    }
+    if (els["btn-queue-add"]) {
+      els["btn-queue-add"].addEventListener("click", addToQueue);
+    }
+    if (els["btn-queue-clear"]) {
+      els["btn-queue-clear"].addEventListener("click", () => {
+        if (state.queueRunning) {
+          toast("warn", "Đang chạy", "Hàng đợi đang tổng hợp — chờ xong rồi xoá nhé.");
+          return;
+        }
+        actions.patch({ queue: [] });
+        renderQueue();
+      });
+    }
+    renderQueue();
+    refreshPlaylist();
+  }
+
+  // Hàng đợi tổng hợp: mỗi đoạn (cách nhau bởi dòng trống) được tổng hợp
+  // lần lượt; xong từng đoạn sẽ xuất hiện trong danh sách phát.
+  function addToQueue() {
+    const raw = els["text-input"].value;
+    const parts = raw.split(/\n\s*\n+/).map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) {
+      toast("warn", "Chưa có văn bản", "Dán nội dung (các đoạn cách nhau bởi dòng trống) rồi bấm Xếp hàng.");
+      return;
+    }
+    if (state.jobBusy) {
+      toast("info", "Đang tổng hợp", "Đợi job hiện tại xong đã rồi xếp hàng tiếp nhé.");
+      return;
+    }
+    const items = parts.map((t) => ({ text: t, status: "wait", jobId: null }));
+    actions.patch({ queue: state.queue.concat(items) });
+    els["text-input"].value = "";
+    state.text = "";
+    updateCounter();
+    renderQueue();
+    runQueueNext();
+  }
+
+  function runQueueNext() {
+    if (state.queueRunning) return;
+    const idx = state.queue.findIndex((q) => q.status === "wait");
+    if (idx < 0) { renderQueue(); return; }
+    const q2 = state.queue.slice();
+    q2[idx] = { ...state.queue[idx], status: "run" };
+    actions.patch({ queue: q2, queueRunning: true });
+    renderQueue();
+    setEditorText(state.queue[idx].text);
+    const off = bridge.bus.on("hcstudio:job", (j) => {
+      if (j.state === "done" || j.state === "error" || j.state === "cancelled") {
+        off();
+        const qi = state.queue.findIndex((x) => x.status === "run");
+        if (qi >= 0) {
+          const upd = { ...state.queue[qi], status: j.state === "done" ? "done" : "err" };
+          const q3 = state.queue.slice();
+          q3[qi] = upd;
+          actions.patch({ queue: q3, queueRunning: false });
+        } else {
+          actions.patch({ queueRunning: false });
+        }
+        refreshPlaylist();
+        renderQueue();
+        setTimeout(runQueueNext, 350);
+      }
+    });
+    window.HC.ui.convertRequested();
+  }
+
+  function setEditorText(t) {
+    els["text-input"].value = t;
+    state.text = t;
+    updateCounter();
+  }
+
+  function renderQueue() {
+    if (!els["queue-list"]) return;
+    const wrap = els["queue-list"];
+    wrap.innerHTML = "";
+    if (els["queue-count-chip"]) {
+      const pending = state.queue.filter((q) => q.status === "wait" || q.status === "run").length;
+      els["queue-count-chip"].textContent = String(pending);
+    }
+    if (!state.queue.length) {
+      const d = document.createElement("div");
+      d.className = "queue-empty";
+      d.textContent = "Hàng đợi trống — dán nhiều đoạn (cách nhau dòng trống) rồi bấm \"Xếp hàng từ văn bản\".";
+      wrap.appendChild(d);
+      return;
+    }
+    state.queue.forEach((q) => {
+      const row = document.createElement("div");
+      row.className = "queue-row " + (q.status === "done" ? "done" : q.status === "err" ? "err" : "");
+      const label = q.status === "run" ? "Đang tổng hợp…" : q.status === "wait" ? "Đang chờ" : q.status === "done" ? "Xong" : "Lỗi";
+      const icon = q.status === "done" ? ICONS.check : q.status === "err" ? ICONS.errorx : ICONS.info;
+      row.innerHTML = `<span class="q-status">${icon}</span><span class="q-text"></span><span class="q-meta">${label}</span>`;
+      row.querySelector(".q-text").textContent = [...q.text].slice(0, 90).join("");
+      wrap.appendChild(row);
+    });
+  }
+
+  async function refreshPlaylist() {
+    if (!els["playlist-list"] || !bridge.ListSessions) return;
+    try {
+      const list = await bridge.ListSessions();
+      actions.patch({ sessions: Array.isArray(list) ? list : [] });
+    } catch { return; }
+    const wrap = els["playlist-list"];
+    wrap.innerHTML = "";
+    if (!state.sessions.length) return;
+    state.sessions.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "queue-row done";
+      const play = document.createElement("button");
+      play.type = "button"; play.title = "Nghe";
+      play.innerHTML = ICONS.play;
+      play.addEventListener("click", () => {
+        actions.patch({ lastFinishedJob: s.id });
+        bridge.PlayJob(s.id).catch(() => {});
+      });
+      const exp = document.createElement("button");
+      exp.type = "button"; exp.title = "Xuất MP3";
+      exp.innerHTML = ICONS.mp3;
+      exp.addEventListener("click", () => window.HC.ui.exportAudio("mp3", s.id));
+      const meta = document.createElement("span");
+      meta.className = "q-meta";
+      meta.textContent = `${Math.round(s.duration)}s · ${s.voiceId || s.engine}`;
+      const txt = document.createElement("span");
+      txt.className = "q-text";
+      txt.textContent = s.textPreview || "";
+      row.appendChild(play); row.appendChild(txt); row.appendChild(meta); row.appendChild(exp);
+      wrap.appendChild(row);
+    });
+  }
+
   window.HC.ui = {
     init() {
       renderIcons(document);   // thay mọi i[data-ico]
@@ -440,24 +615,28 @@
       wireWizard();
       wireRefClone();
       wireLightRam();
+      wireFix52();
 
       bridge.bus.on("hcstudio:job", (j) => {
         if (j.state === "splitting" || j.state === "synthesizing" || j.state === "dsp") {
           actions.patch({ jobBusy: true, currentJob: j.id,
-            progressPct: j.pct, stageLabel: j.message || j.state, etaSec: j.etaSec });
+            progressPct: j.pct, stageLabel: j.message || j.state, etaSec: j.etaSec,
+            elapsedSec: j.elapsedSec ?? state.elapsedSec,
+            streaming: !!j.streaming });
         } else if (j.state === "done") {
           actions.patch({ jobBusy: false, lastFinishedJob: j.id,
             progressPct: 100, stageLabel:
               `Hoàn tất · ${fmtTime((j.durationSec ?? 0) * 1000)}`,
-            durationSec: j.durationSec });
+            durationSec: j.durationSec, streaming: false });
+          refreshPlaylist();
           setTimeout(() => actions.patch({
             stageLabel: state.playing ? "Đang phát…" : "Sẵn sàng"
           }), 2600);
         } else if (j.state === "error") {
           actions.patch({ jobBusy: false, progressPct: 0,
-            stageLabel: "Lỗi · xem thông báo", currentJob: null });
+            stageLabel: "Lỗi · xem thông báo", currentJob: null, streaming: false });
         } else if (j.state === "cancelled") {
-          actions.patch({ jobBusy: false, progressPct: 0, stageLabel: "Đã huỷ" });
+          actions.patch({ jobBusy: false, progressPct: 0, stageLabel: "Đã huỷ", streaming: false });
         }
       });
       bridge.bus.on("hcstudio:play", (p) => {
@@ -466,6 +645,7 @@
           cursorMs: p.cursorMs ?? state.cursorMs,
           totalMs: p.totalMs ?? state.totalMs,
           paused: false,
+          streaming: p.playing ? state.streaming : false,
           stageLabel: p.playing ? "Đang phát…"
             : (state.jobBusy ? state.stageLabel : "Sẵn sàng"),
         });
@@ -477,8 +657,9 @@
       bridge.bus.on("hcstudio:modeldl", renderDownload);
     },
 
+    // PATCH FIX52: PHÁT chỉ nghe KẾT QUẢ đã tổng hợp (nghe trước khi xuất
+    // file). Việc tạo giọng nói tách riêng sang nút "Chuyển đổi".
     playRequested() {
-      const text = els["text-input"].value.trim();
       if (state.playing) {
         // đang phát → pause/resume
         bridge.PauseToggle().then((pausedNow) => {
@@ -487,8 +668,26 @@
         });
         return;
       }
+      if (!state.lastFinishedJob) {
+        toast("warn", "Chưa có kết quả",
+          "Bấm \"Chuyển đổi\" để tạo giọng nói trước, sau đó bấm Phát để nghe.");
+        return;
+      }
+      bridge.PlayJob(state.lastFinishedJob).catch((e) => {
+        toast("error", "Không phát được", String((e && e.message) || e));
+      });
+    },
+
+    // PATCH FIX52: nút CHUYỂN ĐỔI — chỉ bấm 1 lần rồi đợi kết quả (nút tự
+    // khoá khi jobBusy, mở lại khi done/error/cancelled).
+    convertRequested() {
+      if (state.jobBusy) {
+        toast("info", "Đang tổng hợp", "Vui lòng đợi job hiện tại xong đã nhé.");
+        return;
+      }
+      const text = els["text-input"].value.trim();
       if (!text) {
-        toast("warn", "Chưa có văn bản", "Nhập hoặc dán nội dung trước khi phát nhé.");
+        toast("warn", "Chưa có văn bản", "Nhập hoặc dán nội dung trước khi chuyển đổi.");
         els["text-input"].focus();
         return;
       }
@@ -496,6 +695,13 @@
       // PATCH FIX46: nhân bản giọng — khi bật, bỏ voice preset và gửi path
       // file WAV mẫu; backend buộc neural + core dùng ref_audio_path.
       const useRef = state.refCloneOn && state.refAudioPath;
+      const streamLive = els["stream-live-check"] ? els["stream-live-check"].checked : false;
+      // Streaming chỉ bật khi chắc chắn không đụng DSP biến đổi:
+      // neural + tốc độ 1× + cao độ 0 → chất lượng GIỐNG HỆT đệm-đầy.
+      const canStream = streamLive && !useRef
+        && state.enginePref !== "sapi"
+        && Number(state.speed) === 1 && Number(state.pitch) === 0;
+      actions.patch({ stageLabel: "Bắt đầu tổng hợp…", progressPct: 0, elapsedSec: 0 });
       bridge.Synthesize({
         text,
         voiceId: useRef ? "" : state.voiceId,
@@ -503,17 +709,39 @@
         speed: state.speed,
         pitch: state.pitch,
         volume: state.volume,
-        autoPlay: true,
+        autoPlay: canStream,
+        stream: canStream,
         refAudioPath: useRef ? state.refAudioPath : "",
-      }).then(() => actions.patch({ stageLabel: "Bắt đầu tổng hợp…", progressPct: 0 }));
+      }).catch((e) => toast("error", "Không bắt đầu được", String((e && e.message) || e)));
+    },
+
+    // PATCH FIX52: NGHE THỦ giọng đang chọn bằng câu mẫu ngắn.
+    previewVoice() {
+      if (state.jobBusy) {
+        toast("info", "Đang tổng hợp", "Đợi job hiện tại xong đã nhé.");
+        return;
+      }
+      const useRef = state.refCloneOn && state.refAudioPath;
+      bridge.Synthesize({
+        text: "Xin chào, đây là giọng đọc thử của HCStudio.",
+        voiceId: useRef ? "" : state.voiceId,
+        engineOverride: useRef ? "neural" : state.enginePref,
+        speed: state.speed,
+        pitch: state.pitch,
+        volume: state.volume,
+        autoPlay: true,
+        stream: false,
+        refAudioPath: useRef ? state.refAudioPath : "",
+      }).catch(() => {});
     },
 
     stopRequested() {
       bridge.StopAll();
     },
 
-    exportAudio(format) {
-      const job = state.lastFinishedJob;
+    // PATCH FIX52: cho phép xuất từ một hàng trong danh sách phát.
+    exportAudio(format, jobId) {
+      const job = jobId || state.lastFinishedJob;
       if (!job) {
         toast("warn", "Chưa có bản ghi nào", "Hãy phát một đoạn văn bản trước đã.");
         return;

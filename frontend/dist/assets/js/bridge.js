@@ -71,6 +71,10 @@
       GetInt8Status: () => api.GetInt8Status ? api.GetInt8Status() : Promise.resolve("{}"),
       DownloadInt8Assets: () => api.DownloadInt8Assets ? api.DownloadInt8Assets() : Promise.resolve(),
       OpenFolder: (w) => api.OpenFolder(w),
+      // PATCH FIX52: danh sách phát
+      ListSessions: () => api.ListSessions(),
+      // PATCH FIX52: danh sách phát
+      ListSessions: () => api.ListSessions(),
       WindowAction: (cmd) => api.WindowAction(cmd),
       DetectWinTheme: () => api.DetectWinTheme(),
     };
@@ -246,6 +250,8 @@
         });
         return "";
       },
+      // PATCH FIX52: mock danh sách phát rỗng
+      async ListSessions() { return []; },
       async OpenFolder() {}, 
       WindowAction(cmd) { alert(`WindowAction: ${cmd} (chỉ có tác dụng trong bản Windows)`); },
       DetectWinTheme: async () => dark,

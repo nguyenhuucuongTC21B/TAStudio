@@ -88,6 +88,11 @@ type Player struct {
 	totalMs  int
 	cursorMs int
 
+	// PATCH FIX52: kênh dữ liệu cho chế độ streaming
+	feed        chan []byte   // PCM16 chunk đến dần từ tầng synth
+	feedOpen    chan struct{} // đóng = hết dữ liệu (EndStream)
+	streamAbort chan struct{} // đóng khi Stop giữa chừng (chống treo Append)
+
 	paused   bool
 	stopping bool
 	playID   uint64 // đếm phiên Play để Stop cũ không giết phiên mới
@@ -135,6 +140,14 @@ func (p *Player) Stop() {
 	p.mu.Lock()
 	p.stopping = true
 	h := p.handle
+	// PATCH FIX52: mở khoá mọi AppendStream đang chờ nạp dữ liệu.
+	if p.streamAbort != nil {
+		select {
+		case <-p.streamAbort:
+		default:
+			close(p.streamAbort)
+		}
+	}
 	p.mu.Unlock()
 
 	if h != 0 {
@@ -169,6 +182,69 @@ func (p *Player) Play(samples []float32, sr int) error {
 
 	go p.runSession(id, pcmBytes, sr)
 	return nil
+}
+
+// PATCH FIX52 — STREAMING: phát ngay chunk đầu tiên rồi đợi dữ liệu mới
+// qua AppendStream tới EndStream. Dùng cho chế độ "Nghe ngay khi tổng hợp".
+func (p *Player) PlayStream(first []float32, sr int) error {
+	if len(first) == 0 || sr <= 0 {
+		return fmt.Errorf("PCM rỗng hoặc sample rate sai")
+	}
+	pcmBytes := byteSliceOfInt16(dsp.FloatToPCM16Interleaved(first))
+
+	p.mu.Lock()
+	p.playID++
+	id := p.playID
+	old := p.handle
+	p.handle = 0
+	p.sr = sr
+	p.totalMs = 0 // tổng chạy dần theo dữ liệu nạp thêm
+	p.cursorMs = 0
+	p.paused = false
+	p.stopping = false
+	p.feed = make(chan []byte, 64)
+	p.feedOpen = make(chan struct{})
+	p.streamAbort = make(chan struct{})
+	p.mu.Unlock()
+
+	if old != 0 {
+		procWaveOutReset.Call(old)
+	}
+	go p.runStreamSession(id, pcmBytes, sr)
+	return nil
+}
+
+// AppendStream nạp thêm một chunk audio vào phiên streaming đang chạy.
+// An toàn khi gọi sau khi phiên kết thúc (bỏ qua im lặng); không bao giờ
+// treo vô hạn vì select cùng streamAbort.
+func (p *Player) AppendStream(samples []float32) {
+	p.mu.Lock()
+	feed := p.feed
+	abort := p.streamAbort
+	stopping := p.stopping
+	p.mu.Unlock()
+	if feed == nil || stopping || abort == nil || len(samples) == 0 {
+		return
+	}
+	data := byteSliceOfInt16(dsp.FloatToPCM16Interleaved(samples))
+	select {
+	case feed <- data:
+	case <-abort:
+	}
+}
+
+// EndStream báo hết dữ liệu: scheduler phát nốt phần tồn đọng rồi kết thúc.
+func (p *Player) EndStream() {
+	p.mu.Lock()
+	open := p.feedOpen
+	p.mu.Unlock()
+	if open != nil {
+		select {
+		case <-open:
+		default:
+			close(open)
+		}
+	}
 }
 
 func (p *Player) runSession(id uint64, pcm []byte, sr int) {
@@ -302,6 +378,173 @@ func (p *Player) runSession(id uint64, pcm []byte, sr int) {
 		if p.handle == h {
 			p.handle = 0
 		}
+	}
+	p.mu.Unlock()
+
+	p.emitEnded(id)
+}
+
+// PATCH FIX52 — scheduler phiên streaming: giống runSession nhưng dữ liệu
+// đến dần từ kênh feed; kết thúc khi feedOpen đóng VÀ hết dữ liệu tồn.
+func (p *Player) runStreamSession(id uint64, first []byte, sr int) {
+	format := waveFormatEx{
+		FormatTag:      1,
+		Channels:       1,
+		SamplesPerSec:  uint32(sr),
+		BlockAlign:     2,
+		BitsPerSample:  16,
+		AvgBytesPerSec: uint32(sr) * 2,
+	}
+
+	var h uintptr
+	rc, _, _ := procWaveOutOpen.Call(
+		uintptr(unsafe.Pointer(&h)),
+		uintptr(waveMapper),
+		uintptr(unsafe.Pointer(&format)),
+		0, 0, 0 /*CALLBACK_NULL*/)
+	if rc != 0 || h == 0 {
+		p.emitEnded(id)
+		return
+	}
+
+	p.mu.Lock()
+	if p.playID == id {
+		p.handle = h
+	}
+	p.mu.Unlock()
+
+	const hdrSize = unsafe.Sizeof(waveHdr{})
+	slots := make([]waveHdr, numBuffers)
+	data := make([][]byte, numBuffers)
+
+	pending := first    // dữ liệu đã nhận nhưng chưa submit
+	total := len(first) // tổng byte đã nhận (totalMs chạy dần)
+	submitted := 0      // tổng byte đã đổ vào waveOut (cursorMs)
+
+	submit := func(slotIdx int) bool {
+		chunk := 120 * sr / 1000 * 2 // 120 ms theo byte PCM16 mono
+		end := chunk
+		if end > len(pending) {
+			end = len(pending)
+		}
+		if end == 0 {
+			return false
+		}
+		buf := make([]byte, end)
+		copy(buf, pending[:end])
+		pending = pending[end:]
+		data[slotIdx] = buf
+
+		hdr := &slots[slotIdx]
+		*hdr = waveHdr{LpData: uintptr(unsafe.Pointer(&buf[0])), BufferLength: uint32(len(buf))}
+		if rc, _, _ := procWaveOutPrepare.Call(h, uintptr(unsafe.Pointer(hdr)), hdrSize); rc != 0 {
+			return false
+		}
+		if rc, _, _ := procWaveOutWrite.Call(h, uintptr(unsafe.Pointer(hdr)), hdrSize); rc != 0 {
+			procWaveOutUnprep.Call(h, uintptr(unsafe.Pointer(hdr)), hdrSize)
+			return false
+		}
+		submitted += end
+		return true
+	}
+	freeSlot := func(slotIdx int) {
+		hdr := &slots[slotIdx]
+		if hdr.LpData != 0 {
+			procWaveOutUnprep.Call(h, uintptr(unsafe.Pointer(hdr)), hdrSize)
+			hdr.LpData = 0
+			hdr.Flags = 0
+		}
+		data[slotIdx] = nil
+	}
+
+	p.mu.Lock()
+	feed := p.feed
+	open := p.feedOpen
+	p.mu.Unlock()
+
+	nextSlot := 0
+	for {
+		// Gom mọi chunk vừa tới (không chặn).
+	drain:
+		for {
+			select {
+			case b, ok := <-feed:
+				if !ok {
+					break drain
+				}
+				pending = append(pending, b...)
+				total += len(b)
+			default:
+				break drain
+			}
+		}
+		closed := false
+		if open != nil {
+			select {
+			case <-open:
+				closed = true
+			default:
+			}
+		}
+
+		p.mu.Lock()
+		localStop := p.stopping || p.playID != id
+		p.cursorMs = playedMs(submitted, sr)
+		p.totalMs = playedMs(total, sr)
+		progressFn := p.OnProgress
+		totalMs := p.totalMs
+		curMs := p.cursorMs
+		p.mu.Unlock()
+
+		if progressFn != nil && !localStop {
+			progressFn(curMs, totalMs)
+		}
+		if localStop {
+			break
+		}
+
+		hdr := &slots[nextSlot]
+		if hdr.Flags&waveHdrDone != 0 || hdr.LpData == 0 {
+			freeSlot(nextSlot)
+			if len(pending) > 0 {
+				if !submit(nextSlot) {
+					break
+				}
+				nextSlot = (nextSlot + 1) % numBuffers
+				continue
+			}
+			if closed {
+				// Hết dữ liệu + hết nguồn cấp: chờ slot còn lại phát xong.
+				allDone := true
+				for i := 0; i < numBuffers; i++ {
+					if slots[i].LpData != 0 && slots[i].Flags&waveHdrDone == 0 {
+						allDone = false
+						break
+					}
+				}
+				if allDone {
+					break
+				}
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+
+	for i := 0; i < numBuffers; i++ {
+		freeSlot(i)
+	}
+	procWaveOutClose.Call(h)
+
+	// Dọn kênh + trạng thái phiên (chỉ phiên đương nhiệm).
+	p.mu.Lock()
+	if p.playID == id {
+		p.stopping = false
+		if p.handle == h {
+			p.handle = 0
+		}
+		p.feed = nil
+		p.feedOpen = nil
+		p.streamAbort = nil
 	}
 	p.mu.Unlock()
 

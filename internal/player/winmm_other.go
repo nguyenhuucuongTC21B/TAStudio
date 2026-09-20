@@ -29,3 +29,8 @@ func (p *Player) TogglePause() bool {
 func (p *Player) Stop()                                { p.mu.Lock(); p.playing = false; p.mu.Unlock() }
 func (p *Player) CursorMs() int                        { return 0 }
 func (p *Player) Play(samples []float32, sr int) error { return nil }
+
+// PATCH FIX52: stub streaming cho nền tảng khác (chỉ để go vet vượt qua).
+func (p *Player) PlayStream(samples []float32, sr int) error { return nil }
+func (p *Player) AppendStream(samples []float32)             {}
+func (p *Player) EndStream()                                 {}

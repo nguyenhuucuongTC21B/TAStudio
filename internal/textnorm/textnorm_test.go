@@ -12,7 +12,7 @@ func TestNormalize(t *testing.T) {
 		{"so nguyen", "Đây là số 2026.", "Đây là số hai nghìn không trăm hai mươi sáu."},
 		{"so don", "7 ngày", "bảy ngày"},
 		{"thap phan dau phay", "pi la 3,14", "pi la ba phẩy một bốn"},
-		{"thap phan dau cham", "dien tich 1.5 m2", "dien tich một phẩy năm m2"},
+		{"thap phan dau cham", "dien tich 1.5 m2", "dien tich một phẩy năm mét vuông"},
 		{"thousands cham", "so tien 50.000 đồng?", "so tien năm mươi nghìn đồng?"},
 		{"thousands cham x2", "1.234.567", "một triệu hai trăm ba mươi tư nghìn năm trăm sáu mươi bảy"},
 		{"thousands comma", "co 50,000 nguoi", "co năm mươi nghìn nguoi"},
@@ -133,5 +133,37 @@ func TestNormalizeSafeOnPlainText(t *testing.T) {
 		if got := Normalize(s); got != s {
 			t.Errorf("Normalize(%q) = %q, want giữ nguyên", s, got)
 		}
+	}
+}
+
+// ── PATCH FIX52: ngày / giờ / điện thoại / phạm vi / đơn vị đo ──────────
+func TestFix52DatesAndUnits(t *testing.T) {
+	cases := [][2]string{
+		// Ngày đủ dd/mm/yyyy → "ngày ... tháng ... năm ..."
+		// Pipeline đọc SỐ THÀNH CHỮ: ngày 05 → "ngày năm", 9h30 → "chín giờ ba mươi".
+		{"hop 05/03/2026 tai van phong", "hop ngày năm tháng ba năm hai nghìn không trăm hai mươi sáu tai van phong"},
+		{"gap luc 9h30 sang", "gap luc chín giờ ba mươi sang"},
+		{"phat song luc 20:00", "phat song luc hai mươi giờ không"},
+		// Điện thoại đọc rời từng chữ số (giữ nguyên dấu cách quanh).
+		{"goi 0905666624 de ho tro", "goi không chín không năm sáu sáu sáu sáu hai bốn de ho tro"},
+		// Đơn vị đo thông dụng (số cũng được đánh vần).
+		{"quang duong 5 km", "quang duong năm ki lô mét"},
+		{"nang 3 kg", "nang ba ki lô gam"},
+		{"dung luong 128 GB", "dung luong một trăm hai mươi tám gi ga byte"},
+		{"canh bao toc do 60 km/h", "canh bao toc do sáu mươi ki lô mét một giờ"},
+	}
+	for _, c := range cases {
+		got := Normalize(c[0])
+		if got != c[1] {
+			t.Errorf("Normalize(%q) =\n  got  = %q\n  want = %q", c[0], got, c[1])
+		}
+	}
+}
+
+func TestFix52UnitsDoNotTouchWords(t *testing.T) {
+	// Chữ thường KHÔNG có số đứng trước không bao giờ bị đụng tới.
+	in := "mét vuông ki lô gam"
+	if got := Normalize(in); got != in {
+		t.Errorf("Normalize(%q) = %q, muốn giữ nguyên", in, got)
 	}
 }

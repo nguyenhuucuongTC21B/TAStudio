@@ -1234,6 +1234,82 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
 }
 /* ═══════════ HẾT COMPAT FIX51 ═══════════ */
 
+.convert-btn{
+    display:inline-flex; align-items:center; gap:7px;
+    border:1px solid var(--gold-600);
+    background:linear-gradient(180deg,var(--gold-500),var(--gold-600));
+    color:#1B2A4A; font-weight:700; font-size:13px;
+    padding:7px 16px; border-radius:10px; cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+}
+.convert-btn svg{ width:15px; height:15px; }
+.convert-btn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 4px 14px rgba(201,162,39,.35); }
+.convert-btn:disabled{ opacity:.45; cursor:default; }
+.stream-live{ display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--ink-500); cursor:pointer; white-space:nowrap; }
+#wait-label{ color:var(--ink-500); font-size:11px; font-variant-numeric:tabular-nums; }
+.queue-tools{ display:flex; gap:8px; margin-bottom:10px; }
+.queue-btn{
+    flex:1; border:1px solid var(--line); background:transparent; color:var(--ink-700);
+    font-size:12px; padding:7px 10px; border-radius:9px; cursor:pointer;
+}
+.queue-btn:hover{ border-color:var(--gold-500); color:var(--gold-600); }
+.queue-list{ display:flex; flex-direction:column; gap:6px; max-height:170px; overflow:auto; }
+#playlist-list{ margin-top:8px; }
+.queue-row{
+    display:flex; align-items:center; gap:8px; padding:7px 10px;
+    border:1px solid var(--line); border-radius:9px; font-size:12px; color:var(--ink-700);
+}
+.queue-row .q-status{ flex-shrink:0; width:14px; height:14px; display:inline-flex; }
+.queue-row .q-status svg{ width:14px; height:14px; }
+.queue-row .q-text{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.queue-row .q-meta{ flex-shrink:0; color:var(--ink-500); font-size:11px; }
+.queue-row button{
+    border:none; background:transparent; cursor:pointer; color:var(--gold-600);
+    display:inline-flex; padding:2px;
+}
+.queue-row button svg{ width:14px; height:14px; }
+.queue-row.done{ opacity:.85; }
+.queue-row.err{ border-color:#C0392B; }
+.queue-empty{ font-size:12px; color:var(--ink-500); padding:6px 2px; }
+/* ══════════════ PATCH FIX52: convert + wait-label + queue ══════════════ */
+.convert-wrap{ display:flex; align-items:center; gap:10px; }
+.convert-btn{
+    display:inline-flex; align-items:center; gap:7px;
+    border:1px solid var(--gold-600);
+    background:linear-gradient(180deg,var(--gold-500),var(--gold-600));
+    color:#1B2A4A; font-weight:700; font-size:13px;
+    padding:7px 16px; border-radius:10px; cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+}
+.convert-btn svg{ width:15px; height:15px; }
+.convert-btn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 4px 14px rgba(201,162,39,.35); }
+.convert-btn:disabled{ opacity:.45; cursor:default; }
+.stream-live{ display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--ink-500); cursor:pointer; white-space:nowrap; }
+#wait-label{ color:var(--ink-500); font-size:11px; font-variant-numeric:tabular-nums; }
+.queue-tools{ display:flex; gap:8px; margin-bottom:10px; }
+.queue-btn{
+    flex:1; border:1px solid var(--line); background:transparent; color:var(--ink-700);
+    font-size:12px; padding:7px 10px; border-radius:9px; cursor:pointer;
+}
+.queue-btn:hover{ border-color:var(--gold-500); color:var(--gold-600); }
+.queue-list{ display:flex; flex-direction:column; gap:6px; max-height:170px; overflow:auto; }
+#playlist-list{ margin-top:8px; }
+.queue-row{
+    display:flex; align-items:center; gap:8px; padding:7px 10px;
+    border:1px solid var(--line); border-radius:9px; font-size:12px; color:var(--ink-700);
+}
+.queue-row .q-status{ flex-shrink:0; width:14px; height:14px; display:inline-flex; }
+.queue-row .q-status svg{ width:14px; height:14px; }
+.queue-row .q-text{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.queue-row .q-meta{ flex-shrink:0; color:var(--ink-500); font-size:11px; }
+.queue-row button{
+    border:none; background:transparent; cursor:pointer; color:var(--gold-600);
+    display:inline-flex; padding:2px;
+}
+.queue-row button svg{ width:14px; height:14px; }
+.queue-row.done{ opacity:.85; }
+.queue-row.err{ border-color:#C0392B; }
+.queue-empty{ font-size:12px; color:var(--ink-500); padding:6px 2px; }
 </style>
 </head>
 
@@ -1279,14 +1355,22 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
 
 • Hỗ trợ văn bản dài không giới hạn thực tế (tự tách câu để đọc mượt).
 • Cú pháp cảm xúc của VieNeu v3 hoạt động trực tiếp: ví dụ “Nghe hay quá [cười]!”
-• Ctrl+Enter để phát nhanh không cần rời tay khỏi bàn phím."></textarea>
+• Ctrl+Enter để chuyển đổi nhanh (tạo giọng nói)."></textarea>
 
             <div class="card-foot">
                 <div class="counter-wrap">
                     <span id="char-count" class="counter-chip">0 ký tự</span>
                     <span id="eta-chip" class="counter-chip subtle" hidden></span>
                 </div>
-                <span class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> Phát</span>
+                <div class="convert-wrap">
+                    <label class="stream-live" title="Nghe ngay khi đang tổng hợp (streaming)">
+                        <input type="checkbox" id="stream-live-check" /> Nghe ngay
+                    </label>
+                    <button id="btn-convert" class="convert-btn" title="Chuyển văn bản thành giọng nói — chỉ bấm 1 lần rồi đợi kết quả">
+                        <i data-ico="convert"></i><span>Chuyển đổi</span>
+                    </button>
+                    <span class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
+                </div>
             </div>
         </section>
 
@@ -1316,11 +1400,11 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
                     </div>
                 </div>
 
-                <!-- Nhân bản giọng (zero-shot clone, thử nghiệm) -->
+                <!-- Nhân bản giọng (zero-shot clone) -->
                 <div class="ref-clone-row" id="ref-clone-row">
                     <label>
                         <input type="checkbox" id="ref-clone-check" />
-                        <span><strong>Nhân bản giọng</strong> <small style="opacity:.6">(thử nghiệm)</small></span>
+                        <span><strong>Nhân bản giọng</strong> <small style="opacity:.6">zero-shot</small></span>
                     </label>
                     <div id="ref-clone-body">
                         <button type="button" class="ref-clone-pick" id="ref-clone-pick">Chọn file WAV mẫu (3–8s)…</button>
@@ -1382,6 +1466,22 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
                     </div>
                 </div>
             </section>
+
+            <!-- PATCH FIX52: Hàng đợi tổng hợp + Danh sách phát -->
+            <section class="card queue-card">
+                <div class="card-head">
+                    <h2><span class="dot-accent"></span> Hàng đợi &amp; Danh sách phát</h2>
+                    <span id="queue-count-chip" class="counter-chip subtle">0</span>
+                </div>
+                <div style="padding:12px 18px 16px;">
+                    <div class="queue-tools">
+                        <button type="button" class="queue-btn" id="btn-queue-add">Xếp hàng từ văn bản</button>
+                        <button type="button" class="queue-btn" id="btn-queue-clear">Xoá hàng đợi</button>
+                    </div>
+                    <div id="queue-list" class="queue-list"></div>
+                    <div id="playlist-list" class="queue-list"></div>
+                </div>
+            </section>
         </aside>
     </main>
 
@@ -1393,6 +1493,7 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
             </div>
             <div class="progress-meta">
                 <span id="stage-label">Sẵn sàng</span>
+                <span id="wait-label"></span>
                 <span id="pct-label">0%</span>
             </div>
         </div>
@@ -1405,13 +1506,16 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
                 <button id="btn-export-mp3" class="export-btn" title="Xuất file MP3 gọn nhẹ">
                     <i data-ico="mp3"></i><span>MP3</span>
                 </button>
+                <button id="btn-open-export" class="export-btn" title="Mở thư mục đã xuất file">
+                    <i data-ico="folder"></i>
+                </button>
             </div>
 
             <div class="transport-center">
                 <button id="btn-stop" class="ctl-btn stop" title="Dừng lại" disabled>
                     <i data-ico="stop"></i>
                 </button>
-                <button id="btn-play" class="ctl-btn play-main" title="Phát / Tạm dừng" disabled>
+                <button id="btn-play" class="ctl-btn play-main" title="Nghe kết quả / Tạm dừng" disabled>
                     <i data-ico="play" class="ico-play"></i>
                     <i data-ico="pause" class="ico-pause" hidden></i>
                 </button>

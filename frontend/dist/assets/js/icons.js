@@ -20,6 +20,8 @@
     info:   S(`<circle cx="12" cy="12" r="9"/><path d="M12 11v5.4M12 7.6v.2" ${st}/>`, 'fill="none" stroke="currentColor"'),
     wav:    S(`<path d="M4 12h2l2.4-5.4 3 10.8 2.6-7 1.8 1.6H20" ${st}/>`),
     mp3:    S(`<rect x="3.5" y="6.5" width="17" height="11" rx="2.4"/><path d="M7 10h1.8a1.5 1.5 0 010 3H7zm0 3v-3zM12.5 10h1.8a1.5 1.5 0 010 3h-1.8zm0 3v-3M17.5 10.6l1-.4v4" ${st}/>`, 'fill="none" stroke="currentColor"'),
+    // PATCH FIX52: sóng âm — nút "Chuyển đổi"
+    convert: S(`<path d="M4 12h2.2l2-4.6 2.6 9.2 2.2-6 1.5 1.4H20" ${st}/>`, 'fill="none" stroke="currentColor"'),
   };
 
   window.renderIcons = function renderIcons(root = document) {

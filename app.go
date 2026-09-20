@@ -133,6 +133,14 @@ func (a *App) startup(ctx context.Context) {
 		missing := engine.MissingAssets(modelDir)
 		if len(missing) == 0 {
 			diagf("startup: neural READY — đủ toàn bộ trọng số bắt buộc")
+			// PATCH FIX52: đối chiếu catalog 25 giọng với voices JSON
+			// thật trên máy — bắt sớm lệch tên thay vì im lặng rơi về
+			// default voice khi synth.
+			if n, aerr := engine.AuditVoiceCatalog(modelDir); aerr != nil {
+				diagf("[warn] startup: AuditVoiceCatalog: %v", aerr)
+			} else {
+				diagf("startup: catalog voices khớp — %d preset", n)
+			}
 		} else {
 			diagf("startup: neural thiếu %d file bắt buộc:", len(missing))
 			for i, m := range missing {
@@ -368,6 +376,12 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 		}
 	}
 
+	// PATCH FIX52 — STREAMING: chỉ bật khi KHÔNG đụng DSP biến đổi
+	// (Speed==1, Pitch==0, engine neural) => mẫu audio sinh ra TRÙNG HỆ
+	// đường đệm-đầy, đúng nguyên tắc KHÔNG giảm chất lượng giọng.
+	useStream := req.Stream && engKind == engine.EngineNeural &&
+		req.Speed == 1 && req.Pitch == 0
+	streamStarted := false
 	a.pushJob(jobID, "splitting", "Đang tách câu…", 1)
 
 	// PATCH FIX46: chuẩn hoá văn bản TRƯỚC khi tách câu (chỉ neural —
@@ -411,6 +425,10 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 	startWall := time.Now()
 	for i, ch := range chunks {
 		if ctx.Err() != nil {
+			if useStream {
+				a.player.EndStream()
+				a.player.Stop()
+			}
 			a.pushJob(jobID, "cancelled", "Đã huỷ", pctOf(doneChars, totalChars))
 			return
 		}
@@ -421,26 +439,41 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 		// là nghi phạm chính của cảnh "app tự thoát".
 		diagf("job %s: chunk %d/%d bắt đầu synth · %d ký tự · engine=%s",
 			jobID, i+1, len(chunks), len([]rune(ch.Text)), engKind)
+		// PATCH FIX52: văn bản đã chuẩn hoá ở tầng app (chỉ neural) —
+		// tắt normalizer driver để khỏi chạy lặp lại. textnorm idempotent
+		// nên kết quả không đổi, tiết kiệm một vòng regex mỗi chunk
+		// (tối ưu tốc độ không đụng chất lượng).
+		skipNorm := req.SkipTextNorm
+		if engKind == engine.EngineNeural && !req.SkipTextNorm {
+			skipNorm = true
+		}
 		res, serr := driver.Synthesize(ch.Text, engine.SynthOptions{
 			VoiceID: voiceExecID,
 			Speed:   req.Speed,
 			// PATCH FIX46/47: truyền tham chiếu nhân bản (đã trim
 			// 8s nếu dài) + cờ normalizer
 			RefAudioPath: refPath,
-			SkipTextNorm: req.SkipTextNorm,
+			SkipTextNorm: skipNorm,
 			ProgressFn: func(sub float64) {
 				base := pctOf(doneChars, totalChars)
 				unit := float64(len([]rune(ch.Text))) / float64(totalChars)
 				mix := base + unit*sub*90 // synth chiếm khoảng 10%..~92%
-				a.pushJob(jobID, "synthesizing",
+				// PATCH FIX52: kèm thời gian đã chờ + ETA để UI không bao
+				// giờ khiến người dùng tưởng app "đứng im".
+				a.pushJobElapsed(jobID, "synthesizing", mix,
 					fmt.Sprintf("Câu %d/%d · %s", i+1, len(chunks), voiceLabel(jobLabel)),
-					mix)
+					estimateETA(startWall, doneChars, totalChars),
+					time.Since(startWall).Seconds(), useStream)
 			},
 		})
 		if serr != nil {
 			diagf("[error] job %s: synth câu %d/%d thất bại: %v", jobID, i+1, len(chunks), serr)
 			a.pushJob(jobID, "error", serr.Error(), pctOf(doneChars, totalChars))
 			a.toast("error", "Lỗi engine", truncate(serr.Error(), 220))
+			if useStream {
+				a.player.EndStream()
+				a.player.Stop()
+			}
 			return
 		}
 		// PATCH FIX41: mốc sau lệnh gọi driver — nếu hcstudio.log có
@@ -462,8 +495,28 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 		}
 
 		acc = append(acc, res.Samples...)
+		gap := []float32(nil)
 		if ch.GapSec > 0 && i < len(chunks)-1 {
-			acc = append(acc, dsp.Silence(ch.GapSec, firstSR)...)
+			gap = dsp.Silence(ch.GapSec, firstSR)
+			acc = append(acc, gap...)
+		}
+		// PATCH FIX52 — STREAMING: nạp chunk (đã áp âm lượng) vào phiên
+		// phát trực tiếp. Volume là biến đổi pointwise nên mẫu phát ra
+		// TRÙNG HỆ đường đệm-đầy (xuất file vẫn byte-khớp playback).
+		if useStream {
+			chunk := dsp.ApplyVolume(res.Samples, req.Volume)
+			if !streamStarted {
+				streamStarted = true
+				if perr := a.player.PlayStream(chunk, firstSR); perr != nil {
+					diagf("[warn] job %s: PlayStream thất bại (%v) — quay lại đệm đầy", jobID, perr)
+					useStream = false
+				}
+			} else {
+				a.player.AppendStream(chunk)
+			}
+			if len(gap) > 0 {
+				a.player.AppendStream(gap)
+			}
 		}
 		doneChars += len([]rune(ch.Text))
 
@@ -471,6 +524,11 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 		a.pushJobEta(jobID, "synthesizing", pctOf(doneChars, totalChars),
 			fmt.Sprintf("Câu %d/%d hoàn tất", i+1, len(chunks)), eta,
 			time.Since(iStart).Seconds())
+	}
+
+	// PATCH FIX52: kết thúc luồng — scheduler phát nốt phần tồn đọng.
+	if useStream {
+		a.player.EndStream()
 	}
 
 	// DSP chain cuối (một lần, nhất quán playback=export).
@@ -484,7 +542,11 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 		acc = dsp.TimeStretch(acc, firstSR, residual)
 	}
 	acc = dsp.PitchShift(acc, firstSR, req.Pitch)
-	acc = dsp.ApplyVolume(acc, req.Volume)
+	// PATCH FIX52: streaming đã áp âm lượng theo từng chunk — bỏ qua ở
+	// đây để không nhân đôi âm lượng.
+	if !useStream {
+		acc = dsp.ApplyVolume(acc, req.Volume)
+	}
 
 	sess := &Session{
 		ID:       jobID,
@@ -501,7 +563,8 @@ func (a *App) runSynthesis(ctx context.Context, jobID string, req bridge.SynthRe
 	diagf("job %s: HOÀN TẤT · engine=%s · %.1fs audio @%dHz (%d mẫu)",
 		jobID, engKind, sess.Duration, firstSR, len(acc))
 	a.pushJobDone(jobID, sess.Duration)
-	if req.AutoPlay && ctx.Err() == nil {
+	// PATCH FIX52: streaming đã phát live — khỏi PlayJob lặp lại.
+	if req.AutoPlay && ctx.Err() == nil && !useStream {
 		// PATCH run #29: TRƯỚC ĐÂY lỗi phát lại bị bỏ quên âm thầm —
 		// tổng hợp xong 100% nhưng không có tiếng và KHÔNG báo lỗi.
 		if perr := a.PlayJob(jobID); perr != nil {
@@ -517,13 +580,39 @@ func (a *App) putSession(s *Session) {
 	defer a.mu.Unlock()
 	a.sessions[s.ID] = s
 	a.sessionRing = append(a.sessionRing, s.ID)
-	if len(a.sessionRing) > 5 {
-		for len(a.sessionRing) > 5 {
+	// PATCH FIX52: 5 → 20 phiên gần nhất cho khối "Danh sách phát".
+	if len(a.sessionRing) > 20 {
+		for len(a.sessionRing) > 20 {
 			old := a.sessionRing[0]
 			a.sessionRing = a.sessionRing[1:]
 			delete(a.sessions, old)
 		}
 	}
+}
+
+// PATCH FIX52 — ListSessions: metadata các phiên gần nhất (KHÔNG kèm PCM)
+// cho khối "Danh sách phát". Mới nhất đứng đầu.
+func (a *App) ListSessions() []bridge.SessionInfo {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]bridge.SessionInfo, 0, len(a.sessionRing))
+	for i := len(a.sessionRing) - 1; i >= 0; i-- {
+		s := a.sessions[a.sessionRing[i]]
+		if s == nil {
+			continue
+		}
+		prev := s.Text
+		r := []rune(prev)
+		if len(r) > 80 {
+			prev = string(r[:80]) + "…"
+		}
+		out = append(out, bridge.SessionInfo{
+			ID: s.ID, VoiceID: s.VoiceID, Engine: s.Engine,
+			TextPreview: prev, Duration: s.Duration,
+			Created: s.Created.Format("15:04:05"),
+		})
+	}
+	return out
 }
 
 // ---------- TRANSPORT ----------
@@ -574,11 +663,19 @@ func (a *App) CancelJob(jobID string) {
 func (a *App) PickSavePath(defaultName, ext string) string {
 	filter := []wailsruntime.FileFilter{{DisplayName: "Audio", Pattern: "*.wav;*.mp3"}}
 	title := "Xuất file audio"
-	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+	// PATCH FIX52: mở hộp thoại TẠI thư mục đã xuất lần trước — hết cảnh
+	// "không biết file rơi vào đâu".
+	opts := wailsruntime.SaveDialogOptions{
 		Title:           title,
 		DefaultFilename: defaultName,
 		Filters:         filter,
-	})
+	}
+	if a.settings.OutDir != "" {
+		if st, serr := os.Stat(a.settings.OutDir); serr == nil && st.IsDir() {
+			opts.DefaultDirectory = a.settings.OutDir
+		}
+	}
+	path, err := wailsruntime.SaveFileDialog(a.ctx, opts)
 	if err != nil {
 		return ""
 	}
@@ -637,6 +734,12 @@ func (a *App) ExportAudio(jobID, format, path string) error {
 				" · Gợi ý: nếu file này đang được mở bởi trình phát khác, hãy đóng nó rồi xuất lại.")
 		return err
 	}
+	// PATCH FIX52: nhớ thư mục đã xuất cho lần sau (đối chiếu được với
+	// nơi người dùng thực sự chọn).
+	a.mu.Lock()
+	a.settings.OutDir = filepath.Dir(path)
+	_ = a.settings.Save()
+	a.mu.Unlock()
 	diagf("ExportAudio OK: %s (%.1fs giọng đọc)", path, sess.Duration)
 	a.toast("success", "Đã xuất audio",
 		fmt.Sprintf("%s · %.1fs giọng đọc", fileNameOf(path), sess.Duration))
@@ -951,6 +1054,14 @@ func (a *App) pushJob(id, state, msg string, pct float64) {
 func (a *App) pushJobEta(id, state string, pct float64, msg string, eta, durSec float64) {
 	a.emit.Send("hcstudio:job", bridge.JobSnapshot{
 		ID: id, State: state, Pct: pct, Message: msg, EtaSec: eta, DurationSec: durSec,
+	})
+}
+
+// PATCH FIX52: snapshot đầy đủ — ETA + thời gian đã chờ + cờ streaming.
+func (a *App) pushJobElapsed(id, state string, pct float64, msg string, eta, elapsedSec float64, streaming bool) {
+	a.emit.Send("hcstudio:job", bridge.JobSnapshot{
+		ID: id, State: state, Pct: pct, Message: msg, EtaSec: eta,
+		ElapsedSec: elapsedSec, Streaming: streaming,
 	})
 }
 

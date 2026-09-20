@@ -58,6 +58,11 @@ func NormalizeWith(in string, o Options) string {
 
 	if !o.SkipSymbols {
 		s = normalizeURLAndEmail(s)
+		// PATCH FIX52: ngày/giờ/điện thoại/phạm vi/đơn vị — phải chạy
+		// TRƯỚC reMath2 nếu không "05/03/2026" bị đọc thành phép chia
+		// ("năm bằng ba") và "60 km/h" vỡ dấu cách.
+		s = normalizeDatesTimes(s)
+		s = normalizeUnits(s)
 		s = normalizeContextSymbols(s)
 	}
 	if !o.SkipNumbers {
@@ -210,6 +215,91 @@ var (
 	// từ ghép như "m2", "v1.2.3" — model đọc nguyên bản tốt hơn).
 	reNumber = regexp.MustCompile(`([^A-Za-zÀ-ỹ0-9.]|^)(\d+(?:[.,]\d+)*)`)
 )
+
+// ─────────────────────────────────────────────────────────────────
+// PATCH FIX52: NGÀY / GIỜ / ĐIỆN THOẠI / PHẠM VI / ĐƠN VỊ ĐO
+// ─────────────────────────────────────────────────────────────────
+var (
+	reDateFull  = regexp.MustCompile(`\b(\d{1,2})[/\.](\d{1,2})[/\.](\d{4})\b`)
+	reMonthYear = regexp.MustCompile(`\b(\d{1,2})/(\d{4})\b`)
+	reTimeHM    = regexp.MustCompile(`\b(\d{1,2})\s*[:h]\s*(\d{2})\b`)
+	reHour      = regexp.MustCompile(`\b(\d{1,2})\s*h\b`)
+	reRange     = regexp.MustCompile(`\b(\d{2,4})\s*[-–]\s*(\d{2,4})\b`)
+	rePhone     = regexp.MustCompile(`\b0[\d\s\.\-]{8,12}\b`)
+)
+
+// digitVN đọc từng chữ số (số điện thoại đọc rời từng số).
+var digitVN = map[rune]string{
+	'0': "không", '1': "một", '2': "hai", '3': "ba", '4': "bốn",
+	'5': "năm", '6': "sáu", '7': "bảy", '8': "tám", '9': "chín",
+}
+
+func normalizeDatesTimes(s string) string {
+	// Số điện thoại: đọc rời từng chữ số (bắt TRƯỚC các quy tắc khác
+	// vì 0905... không bao giờ được đọc là "chín trăm lẻ...".
+	s = rePhone.ReplaceAllStringFunc(s, func(m string) string {
+		var b strings.Builder
+		first := true
+		for _, r := range m {
+			if w, ok := digitVN[r]; ok {
+				if !first {
+					b.WriteByte(' ')
+				}
+				b.WriteString(w)
+				first = false
+			}
+		}
+		out := b.String()
+		// regex nuốt cả \s cuối ({8,12} chứa \s) — trả lại để từ
+		// sau không dính liền ("bốn de" chứ không phải "bốnde").
+		if strings.HasSuffix(m, " ") {
+			out += " "
+		}
+		return out
+	})
+	// Ngày đủ dd/mm/yyyy (chấp nhận . và -); KHÔNG khớp 3.14 vì cần
+	// nhóm cuối là 4 chữ số năm.
+	s = reDateFull.ReplaceAllString(s, "ngày $1 tháng $2 năm $3")
+	s = reMonthYear.ReplaceAllString(s, "tháng $1 năm $2")
+	// Giờ: 9h30, 9:30 → "9 giờ 30"; 9h → "9 giờ".
+	s = reTimeHM.ReplaceAllString(s, "$1 giờ $2$3")
+	s = reHour.ReplaceAllString(s, "$1 giờ$2")
+	// Phạm vi năm/đếm: 2020-2025 → "từ 2020 đến 2025".
+	s = reRange.ReplaceAllString(s, "từ $1 đến $2$3")
+	return s
+}
+
+// unitVN các đơn vị đo viết tắt phổ biến (chỉ đổi khi có số đứng trước;
+// boundary tường minh [^\p{L}0-9] — KHÔNG dùng \b vì Go RE2 tính boundary
+// ASCII, chữ "mét" có 'é' ngoài bảng ASCII làm `m\b` khớp sai).
+var reUnitTable = []struct {
+	re  *regexp.Regexp
+	rep string
+}{
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*(?:km2|km²)([^\p{L}0-9]|$)`), "$1 ki lô mét vuông$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*(?:m2|m²)([^\p{L}0-9]|$)`), "$1 mét vuông$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*km/h([^\p{L}0-9]|$)`), "$1 ki lô mét một giờ$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*km([^\p{L}0-9]|$)`), "$1 ki lô mét$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*cm([^\p{L}0-9]|$)`), "$1 xăng ti mét$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*mm([^\p{L}0-9]|$)`), "$1 mi li mét$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*kg([^\p{L}0-9]|$)`), "$1 ki lô gam$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*(?:gam|g)([^\p{L}0-9]|$)`), "$1 gam$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*ml([^\p{L}0-9]|$)`), "$1 mi lít$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*TB([^\p{L}0-9]|$)`), "$1 tê ra byte$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*GB([^\p{L}0-9]|$)`), "$1 gi ga byte$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*MB([^\p{L}0-9]|$)`), "$1 mê ga byte$2"},
+	{regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*KB([^\p{L}0-9]|$)`), "$1 ki lô byte$2"},
+	{regexp.MustCompile(`(\d+(?:[.,]\d+)?)\s*kW([^\p{L}0-9]|$)`), "$1 ki lô oát$2"},
+	{regexp.MustCompile(`(\d+(?:[.,]\d+)?)\s*W([^\p{L}0-9]|$)`), "$1 oát$2"},
+	{regexp.MustCompile(`(\d+(?:[.,]\d+)?)\s*m([^\p{L}0-9]|$)`), "$1 mét$2"},
+}
+
+func normalizeUnits(s string) string {
+	for _, u := range reUnitTable {
+		s = u.re.ReplaceAllString(s, u.rep)
+	}
+	return s
+}
 
 func normalizeNumbers(s string) string {
 	s = rePct.ReplaceAllStringFunc(s, func(m string) string {
